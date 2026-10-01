@@ -6007,14 +6007,14 @@ Try adjusting maxTime or maxRetries parameters for faker.helpers.unique().`);
     fullName: ["fullname", "full_name", "name"],
     nameAtSchool: ["nameatschool", "name_at_school"],
     genderId: ["genderid", "gender"],
-    relationshipId: ["relationshipid", "relationship"],
-    email: ["email", "mail"],
+    relationshipId: ["relationshipid", "relationship", "relationtostudent"],
+    email: ["email", "mail", "emailaddress"],
     phone: ["phone", "phonenumber", "telephone", "tel"],
     mobile: ["mobile", "mobilephone", "cellphone", "cell"],
     homePhone: ["homephone", "home_phone"],
     workPhone: ["workphone", "work_phone", "officephone"],
     communicationPreference: ["communicationpreference", "preferredcommunication"],
-    dateOfBirth: ["dateofbirth", "dob", "birthdate"],
+    dateOfBirth: ["dateofbirth", "dob", "birthdate", "bday", "birthday"],
     company: ["company", "organization", "organisation", "employer"],
     jobTitle: ["jobtitle", "position", "role"],
     schoolName: ["schoolname", "school"],
@@ -6036,20 +6036,20 @@ Try adjusting maxTime or maxRetries parameters for faker.helpers.unique().`);
       "howmanywillbeattending",
       "attending"
     ],
-    addressLine1: ["addressline1", "address1", "street", "address"],
+    addressLine1: ["addressline1", "address1", "street", "address", "streetaddress"],
     address: ["address"],
-    addressLine2: ["addressline2", "address2", "unit", "apartment", "sublocality"],
-    city: ["city", "town"],
-    state: ["state", "province", "region", "administrativearea"],
-    postalCode: ["postalcode", "postcode", "postcode", "zipcode", "zip"],
+    addressLine2: ["addressline2", "address2", "unit", "apartment", "sublocality", "citydistrict"],
+    city: ["city", "town", "suburb", "addresslevel2", "locality"],
+    state: ["state", "province", "region", "administrativearea", "addresslevel1"],
+    postalCode: ["postalcode", "postcode", "zipcode", "zip"],
     postCode: ["postcode"],
     countryId: ["countryid"],
     country: ["country"],
     nationality: ["nationality"],
     website: ["website", "url"],
     notes: ["notes", "note", "comment", "remarks"],
-    description: ["description", "details", "message", "about"],
-    message: ["message"],
+    description: ["description", "details", "about"],
+    message: ["message", "additionalinformation", "anyquestions"],
     alumniId: ["alumniid", "alumni_id"],
     graduationYear: ["graduationyear", "gradyear"],
     personalTourRequested: ["personaltourrequested"],
@@ -6064,7 +6064,7 @@ Try adjusting maxTime or maxRetries parameters for faker.helpers.unique().`);
     familyCircumstancesIds: ["familycircumstancesids", "familycircumstances"],
     familyTypeIds: ["familytypeids", "familytypes"],
     geographicStatusId: ["geographicstatusid"],
-    mainLanguageId: ["mainlanguageid", "languageid"],
+    mainLanguageId: ["mainlanguageid", "languageid", "language"],
     studentResidenceId: ["studentresidenceid"],
     siblingsId: ["siblingsid"],
     hasFutureSiblings: ["hasfuturesiblings"],
@@ -6088,11 +6088,119 @@ Try adjusting maxTime or maxRetries parameters for faker.helpers.unique().`);
     password: ["password", "passcode"],
     confirmPassword: ["confirmpassword", "passwordconfirm", "repeatpassword"]
   };
+  var LABEL_PHRASES = {
+    hearabout: "hearAboutUsId",
+    howdidyouhear: "hearAboutUsId",
+    otherchildren: "hasFutureSiblings",
+    futuresiblings: "hasFutureSiblings",
+    privatetour: "personalTourRequested",
+    personaltour: "personalTourRequested",
+    prospectus: "sendProspectus",
+    religio: "religionId",
+    boarding: "boardingTypeId",
+    catchment: "geographicStatusId",
+    specialneeds: "hasSpecialNeeds",
+    learningneeds: "hasSpecialNeeds",
+    currentschool: "currentSchoolId",
+    startingyear: "startingYear",
+    yearofentry: "startingYear",
+    entryyear: "startingYear",
+    yearlevel: "schoolIntakeYearId",
+    intakeyear: "schoolIntakeYearId",
+    enrolmentyearlevel: "schoolIntakeYearId",
+    languagespokenathome: "mainLanguageId",
+    mainlanguage: "mainLanguageId",
+    indigenous: "indigenousStatusId",
+    aboriginal: "indigenousStatusId",
+    torresstrait: "indigenousStatusId",
+    countryoforigin: "countryOfOriginId",
+    countryofbirth: "countryOfOriginId",
+    firstvisit: "isFirstVisit",
+    howmanypeople: "totalAttendees",
+    attendee: "totalAttendees",
+    liveswith: "studentResidenceId",
+    studentresidence: "studentResidenceId",
+    familytype: "familyTypeIds",
+    familycircumstance: "familyCircumstancesIds",
+    familyconnection: "familyConnectionId",
+    connectiontotheschool: "familyConnectionId",
+    sibling: "siblingsId",
+    interests: "otherInterests",
+    dateofbirth: "dateOfBirth",
+    communicationpreference: "communicationPreference",
+    preferredmethodofcommunication: "communicationPreference"
+  };
+  var EXACT_ONLY_ALIASES = /* @__PURE__ */ new Set(["name", "title", "role", "about", "details", "other", "no", "unit"]);
+  var GENERIC_HINT_PATTERN = /^(val|search|on|off|true|false|mat-[a-z-]*-?\d+|mat-radio-group-\d+|ng-[a-z0-9-]+|cdk-[a-z0-9-]+|customfield\d+|custom-field-\d+|g-recaptcha-response.*|mat-input-\d+|mat-select-\d+|mat-checkbox-\d+-input|formly_[a-z0-9_]+)$/i;
   function normalizeValue(value) {
     return value.toLowerCase().replace(/[^a-z0-9]/g, "");
   }
   function unique(values) {
     return [...new Set(values.filter(Boolean))];
+  }
+  function splitWords(value) {
+    return value.replace(/([a-z0-9])([A-Z])/g, "$1 $2").replace(/[^a-zA-Z0-9]+/g, " ").toLowerCase().split(" ").filter(Boolean);
+  }
+  function matchAliasInHint(hintJoined, hintWords, alias) {
+    if (hintJoined === alias)
+      return "exact";
+    for (let i50 = 0; i50 < hintWords.length; i50++) {
+      let acc = "";
+      for (let j50 = i50; j50 < hintWords.length; j50++) {
+        acc += hintWords[j50];
+        if (acc === alias)
+          return "word";
+        if (acc.length >= alias.length)
+          break;
+      }
+    }
+    if (alias.length >= 5 && hintJoined.includes(alias))
+      return "substring";
+    return null;
+  }
+  function isGenericHintToken(value) {
+    const trimmed = value.trim();
+    if (!trimmed)
+      return true;
+    return GENERIC_HINT_PATTERN.test(trimmed) || GENERIC_HINT_PATTERN.test(normalizeValue(trimmed));
+  }
+  var MATCH_MULTIPLIER = {
+    exact: 4,
+    word: 2.5,
+    substring: 1.5
+  };
+  var MIN_MATCH_SCORE = 8;
+  function resolveFieldKeyFromHints(hints) {
+    let best = null;
+    const consider = (key, score, hint) => {
+      if (score < MIN_MATCH_SCORE)
+        return;
+      if (!best || score > best.score) {
+        best = { key, score, hint: hint.text, source: hint.source };
+      }
+    };
+    for (const hint of hints) {
+      const joined = normalizeValue(hint.text);
+      if (!joined || isGenericHintToken(hint.text))
+        continue;
+      const words = splitWords(hint.text);
+      for (const [phrase, key] of Object.entries(LABEL_PHRASES)) {
+        if (joined.includes(phrase)) {
+          consider(key, hint.weight * 3 + phrase.length * 0.1, hint);
+        }
+      }
+      for (const [key, aliases] of Object.entries(FIELD_ALIASES)) {
+        for (const alias of aliases) {
+          const kind = matchAliasInHint(joined, words, alias);
+          if (!kind)
+            continue;
+          if (EXACT_ONLY_ALIASES.has(alias) && kind !== "exact")
+            continue;
+          consider(key, hint.weight * MATCH_MULTIPLIER[kind] + alias.length * 0.1, hint);
+        }
+      }
+    }
+    return best;
   }
   function buildRandomTemplate(group) {
     const firstName = f55.person.firstName();
@@ -6209,18 +6317,8 @@ Try adjusting maxTime or maxRetries parameters for faker.helpers.unique().`);
     return defaultFormTemplates[group];
   }
   function resolveFieldKey(fieldName) {
-    const normalizedName = normalizeValue(fieldName);
-    if (!normalizedName)
-      return null;
-    for (const [fieldKey, aliases] of Object.entries(FIELD_ALIASES)) {
-      for (const alias of aliases) {
-        const normalizedAlias = normalizeValue(alias);
-        if (normalizedName.includes(normalizedAlias)) {
-          return fieldKey;
-        }
-      }
-    }
-    return null;
+    const resolved = resolveFieldKeyFromHints([{ text: fieldName, weight: 5, source: "legacy" }]);
+    return resolved?.key || null;
   }
   function getFieldKey(fieldName) {
     return resolveFieldKey(fieldName);
@@ -6245,40 +6343,702 @@ Try adjusting maxTime or maxRetries parameters for faker.helpers.unique().`);
       return profileData.attendeeCount || "1";
     return profileData.notes || "QA Test Data";
   }
-  function getFieldName(element) {
-    const labelledByIds = (element.getAttribute("aria-labelledby") || "").split(" ").map((id) => id.trim()).filter(Boolean);
-    const labelledByTexts = labelledByIds.map((id) => document.getElementById(id)?.textContent?.trim() || "").filter(Boolean);
-    const hints = unique([
-      element.dataset.testid || "",
-      element.getAttribute("formcontrolname") || "",
-      element.getAttribute("data-testid") || "",
-      element.getAttribute("aria-label") || "",
-      element.getAttribute("autocomplete") || "",
-      element.name || "",
-      element.id || "",
-      element.placeholder || "",
-      element.getAttribute("title") || "",
-      ...labelledByTexts
-    ]);
-    if (element.labels && element.labels.length > 0) {
-      Array.from(element.labels).forEach((label) => hints.push(label.innerText.trim()));
+  function cleanHintText(value) {
+    return (value || "").replace(/\s+/g, " ").trim();
+  }
+  function collectFieldHints(element) {
+    const hints = [];
+    const seen = /* @__PURE__ */ new Set();
+    const push = (text, weight, source) => {
+      const cleaned = cleanHintText(text);
+      if (!cleaned || cleaned === "val")
+        return;
+      const dedupeKey = `${cleaned.toLowerCase()}`;
+      if (seen.has(dedupeKey))
+        return;
+      seen.add(dedupeKey);
+      hints.push({ text: cleaned.slice(0, 160), weight, source });
+    };
+    const attr = (name) => element.getAttribute(name);
+    push(attr("formcontrolname"), 10, "formcontrolname");
+    push(attr("data-testid"), 10, "data-testid");
+    push(attr("htmlid"), 9, "htmlid");
+    let ancestor = element.parentElement;
+    for (let depth = 0; ancestor && ancestor !== document.body && depth < 8; depth++) {
+      push(ancestor.getAttribute("formcontrolname"), 10, "wrapper-formcontrolname");
+      push(ancestor.getAttribute("htmlid"), 9, "wrapper-htmlid");
+      push(ancestor.getAttribute("data-testid"), 8, "wrapper-data-testid");
+      ancestor = ancestor.parentElement;
     }
-    const wrappingLabel = element.closest("label");
-    if (wrappingLabel?.innerText) {
-      hints.push(wrappingLabel.innerText.trim());
+    push(attr("autocomplete"), 9, "autocomplete");
+    push(element.id, 8, "id");
+    push(attr("name"), 8, "name");
+    push(attr("aria-label"), 7, "aria-label");
+    (attr("aria-labelledby") || "").split(" ").map((id) => id.trim()).filter(Boolean).forEach((id) => push(document.getElementById(id)?.textContent, 7, "aria-labelledby"));
+    const labelable = element;
+    if (labelable.labels && labelable.labels.length > 0) {
+      Array.from(labelable.labels).forEach((label) => push(label.textContent, 6, "label"));
     }
+    push(element.closest("label")?.textContent, 6, "wrapping-label");
     if (element.id) {
-      const explicitLabel = document.querySelector(`label[for="${element.id}"]`);
-      if (explicitLabel && explicitLabel instanceof HTMLElement) {
-        hints.push(explicitLabel.innerText.trim());
+      push(document.querySelector(`label[for="${CSS.escape(element.id)}"]`)?.textContent, 6, "label-for");
+    }
+    const formField = element.closest("mat-form-field, .mat-mdc-form-field, .form-group, .field, .input-group");
+    if (formField) {
+      push(formField.querySelector("mat-label")?.textContent, 6, "mat-label");
+      push(formField.querySelector(".mat-form-field-label, .mat-mdc-floating-label")?.textContent, 5, "floating-label");
+    }
+    const questionContainer = element.closest('[class*="col-"], .form-group, .question, app-radio-group, app-checkbox-group, app-other-list-item, app-select-search');
+    const questionScope = questionContainer?.closest('[class*="col-"]') || questionContainer;
+    if (questionScope) {
+      const questionLabel = Array.from(questionScope.querySelectorAll("label, legend")).find((label) => !label.closest("mat-radio-button, mat-checkbox, mat-form-field, mat-slide-toggle, .mat-mdc-form-field"));
+      push(questionLabel?.textContent, 5, "question-label");
+    }
+    push(attr("placeholder"), 4, "placeholder");
+    push(attr("title"), 4, "title");
+    return hints;
+  }
+  function getFieldName(element) {
+    return unique(collectFieldHints(element).map((hint) => hint.text)).join(" ");
+  }
+
+  // src/testids.ts
+  var SF_PREFIX = "sf-";
+  var SF_FIELD_SUB_ELEMENT_MARKERS = ["-option-", "-file-", "-delete-", "-clear"];
+  var SF_FIELD_ROOT_SELECTOR = `[data-testid^="${SF_PREFIX}"]` + SF_FIELD_SUB_ELEMENT_MARKERS.map((marker) => `:not([data-testid*="${marker}"])`).join("");
+  function sfPathFromTestId(testId) {
+    return testId.replace(/^sf-/, "");
+  }
+  function sfFieldPathFromAnyTestId(testId) {
+    return sfPathFromTestId(testId).replace(/-(?:option|file|delete)-.*$/, "").replace(/-clear$/, "");
+  }
+  function sfOptionTestIdPrefix(path) {
+    return `${SF_PREFIX}${path}-option-`;
+  }
+  function sfOptionValueFromTestId(path, testId) {
+    return testId.slice(sfOptionTestIdPrefix(path).length);
+  }
+  function parseWebformTestId(testId) {
+    if (!testId || !testId.startsWith("webform-"))
+      return null;
+    const rest = testId.slice("webform-".length);
+    let match = /^event-contact2-reg-(.+)$/.exec(rest);
+    if (match)
+      return { form: "event", contact: 2, slug: match[1] };
+    match = /^event-reg-(.+)$/.exec(rest);
+    if (match)
+      return { form: "event", contact: 1, slug: match[1] };
+    match = /^(general|prospectus)-contact2-(.+)$/.exec(rest);
+    if (match)
+      return { form: match[1], contact: 2, slug: match[2] };
+    match = /^(general|prospectus|student)-(.+)$/.exec(rest);
+    if (match)
+      return { form: match[1], contact: 1, slug: match[2] };
+    return null;
+  }
+  var WEBFORM_SLUG_TO_PROFILE_KEY = {
+    "salutation": "salutationId",
+    "first-name": "firstName",
+    "last-name": "lastName",
+    "gender": "genderId",
+    "relationship": "relationshipId",
+    "email": "email",
+    "mobile": "mobile",
+    "home-phone": "homePhone",
+    "work-phone": "workPhone",
+    "graduation-year": "graduationYear",
+    "name-at-school": "nameAtSchool",
+    "is-spouse": "isSpouse",
+    "address": "address",
+    "city": "city",
+    "postcode": "postCode",
+    "family-connections": "familyConnectionId",
+    "future-siblings": "hasFutureSiblings",
+    "hear-about-us": "hearAboutUsId",
+    "message": "message",
+    "send-confirmation": "sendConfirmationContact2",
+    "total-attendees": "totalAttendees",
+    "is-first-visit": "isFirstVisit",
+    "sub-tours": "subTours",
+    "event": "eventId",
+    "campus-id": "campusId",
+    "date-of-birth": "dateOfBirth",
+    "current-school-year": "currentSchoolYearId",
+    "indigenous-status": "indigenousStatusId",
+    "school-intake-year": "schoolIntakeYearId",
+    "special-needs": "hasSpecialNeeds",
+    "starting-period": "startingPeriodId",
+    "starting-year": "startingYear",
+    "submitted-application": "submittedApplication",
+    "other-interests": "notes"
+  };
+  function profileKeyForWebformTestId(testId) {
+    const parsed = parseWebformTestId(testId);
+    if (!parsed)
+      return null;
+    return WEBFORM_SLUG_TO_PROFILE_KEY[parsed.slug] || null;
+  }
+  function widgetIdOf(node) {
+    if (!node?.widget)
+      return void 0;
+    return typeof node.widget === "string" ? node.widget : node.widget.id;
+  }
+  function resolveNode(root, node, depth = 0) {
+    if (!node || depth > 10)
+      return node;
+    if (node.$ref) {
+      const name = node.$ref.replace(/^#\/definitions\//, "");
+      const target = root.definitions?.[name];
+      if (target)
+        return resolveNode(root, { ...target, ...node, $ref: void 0 }, depth + 1);
+    }
+    if (node.allOf?.length) {
+      const merged = { ...node, allOf: void 0 };
+      for (const part of node.allOf) {
+        const resolved = resolveNode(root, part, depth + 1);
+        if (!resolved)
+          continue;
+        merged.properties = { ...merged.properties ?? {}, ...resolved.properties ?? {} };
+        Object.assign(merged, { ...resolved, properties: merged.properties });
       }
+      return merged;
     }
-    const fieldWrapper = element.closest("mat-form-field, .form-group, .field, .input-group");
-    const nearbyLabel = fieldWrapper?.querySelector("label, mat-label");
-    if (nearbyLabel && nearbyLabel instanceof HTMLElement) {
-      hints.push(nearbyLabel.innerText.trim());
+    return node;
+  }
+  function lookupByCanonicalPath(root, notation) {
+    let node = root;
+    for (const segment of notation.split(".")) {
+      node = resolveNode(root, node);
+      if (!node)
+        return void 0;
+      node = node.properties?.[segment] ?? (/^\d+$/.test(segment) ? node.items : void 0);
     }
-    return unique(hints).join(" ");
+    return resolveNode(root, node);
+  }
+  function extractSchemaFromResponse(body) {
+    const envelope = body;
+    const document2 = envelope?.data ?? body;
+    const schema = document2?.form ?? document2?.formTemplate;
+    return schema?.properties ? schema : void 0;
+  }
+  var PATTERN_CANDIDATES = ["0412345678", "412345678", "+61412345678", "4000", "12345", "E2E Test Value", "E2E", "A1", "1"];
+  function clampToLength(value, node) {
+    let out = value;
+    if (node.maxLength !== void 0 && out.length > node.maxLength)
+      out = out.slice(0, node.maxLength);
+    if (node.minLength !== void 0 && out.length < node.minLength)
+      out = out.padEnd(node.minLength, "x");
+    return out;
+  }
+  var OPTION_DRIVEN_WIDGETS = /* @__PURE__ */ new Set([
+    "select",
+    "special_select",
+    "radio",
+    "accentRadio",
+    "checkbox",
+    "boolean",
+    "year",
+    "spouse",
+    "date",
+    "range",
+    "event",
+    "signature-capture",
+    "files-array",
+    "files-section",
+    "payment",
+    "payment-status"
+  ]);
+  function testPattern(pattern, value) {
+    try {
+      return new RegExp(pattern).test(value);
+    } catch {
+      return true;
+    }
+  }
+  function generateValue(node) {
+    const widget = widgetIdOf(node);
+    if (widget && OPTION_DRIVEN_WIDGETS.has(widget) || node.enum || node.oneOf) {
+      return { value: "", strategy: `option-driven(${widget ?? "enum"})` };
+    }
+    if (node.pattern) {
+      const match = PATTERN_CANDIDATES.find((candidate) => testPattern(node.pattern, candidate));
+      if (match)
+        return { value: clampToLength(match, node), strategy: `pattern(${node.pattern})` };
+      return { value: clampToLength("QA Test Value", node), strategy: `pattern-unmatched(${node.pattern})` };
+    }
+    if (node.format === "email")
+      return { value: clampToLength("qa-test@example.com", node), strategy: "format(email)" };
+    if (node.format === "uri")
+      return { value: clampToLength("https://example.com", node), strategy: "format(uri)" };
+    if (widget === "phone" || widget === "tel")
+      return { value: "412345678", strategy: `widget(${widget})` };
+    if (widget === "email")
+      return { value: clampToLength("qa-test@example.com", node), strategy: "widget(email)" };
+    if (node.type === "integer" || node.type === "number" || widget === "integer" || widget === "number" || widget === "amount") {
+      const min = node.minimum ?? 1;
+      const max = node.maximum ?? min + 10;
+      return { value: String(Math.min(Math.max(5, min), max)), strategy: "numeric-bounds" };
+    }
+    return { value: clampToLength("QA Test Value", node), strategy: "fallback" };
+  }
+  function fitsSchema(value, node) {
+    if (!node)
+      return true;
+    if (node.pattern && !testPattern(node.pattern, value))
+      return false;
+    if (node.maxLength !== void 0 && value.length > node.maxLength)
+      return false;
+    if (node.minLength !== void 0 && value.length < node.minLength)
+      return false;
+    if (node.type === "integer" || node.type === "number") {
+      const n43 = Number(value);
+      if (Number.isNaN(n43))
+        return false;
+      if (node.minimum !== void 0 && n43 < node.minimum)
+        return false;
+      if (node.maximum !== void 0 && n43 > node.maximum)
+        return false;
+    }
+    if (node.format === "email" && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(value))
+      return false;
+    return true;
+  }
+  var WIDGET_STRATEGIES = {
+    string: "text",
+    search: "text",
+    tel: "text",
+    url: "text",
+    email: "text",
+    password: "text",
+    color: "text",
+    "date-time": "text",
+    time: "text",
+    textarea: "text",
+    chips: "text",
+    integer: "numeric",
+    number: "numeric",
+    amount: "numeric",
+    range: "range",
+    phone: "phone",
+    select: "select",
+    special_select: "select",
+    spouse: "select",
+    event: "select",
+    year: "select",
+    radio: "radio",
+    accentRadio: "radio",
+    checkbox: "checkbox",
+    boolean: "checkbox",
+    date: "date",
+    stepper: "container",
+    object: "container",
+    array: "container",
+    expansionPanel: "container",
+    info: "container",
+    hidden: "container",
+    readonly: "container",
+    button: "container",
+    "signature-routing": "container",
+    address: "container",
+    "files-section": "container",
+    signature: "container",
+    "files-array": "file",
+    "signature-capture": "signature",
+    payment: "unsupported",
+    "payment-status": "unsupported"
+  };
+  function strategyFromTag(tag, inputType) {
+    if (tag === "mat-select")
+      return "select";
+    if (tag === "mat-radio-group")
+      return "radio";
+    if (tag === "mat-checkbox")
+      return "checkbox";
+    if (tag === "textarea")
+      return "text";
+    if (tag === "input") {
+      if (inputType === "range")
+        return "range";
+      if (inputType === "number")
+        return "numeric";
+      return "text";
+    }
+    return void 0;
+  }
+
+  // src/schemaForm.ts
+  var SCHEMA_NODE_ID = "qa-autofill-schema";
+  function readCapturedSchema() {
+    const node = document.getElementById(SCHEMA_NODE_ID);
+    if (!node?.textContent)
+      return void 0;
+    try {
+      return extractSchemaFromResponse({ form: JSON.parse(node.textContent) });
+    } catch {
+      return void 0;
+    }
+  }
+  function hasSchemaFormFields() {
+    return document.querySelector(SF_FIELD_ROOT_SELECTOR) !== null;
+  }
+  function isRendered(element) {
+    if (!(element instanceof HTMLElement))
+      return true;
+    if (element.getClientRects().length === 0)
+      return false;
+    const style = window.getComputedStyle(element);
+    return style.visibility !== "hidden" && style.display !== "none";
+  }
+  function isDisabledControl(element) {
+    if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element instanceof HTMLSelectElement) {
+      if (element.disabled)
+        return true;
+    }
+    return element.getAttribute("aria-disabled") === "true" || element.classList.contains("mat-mdc-select-disabled");
+  }
+  function labelOf(element) {
+    return (element.textContent || "").replace(/\s+/g, " ").trim().toLowerCase();
+  }
+  function isDenied(element, denylist) {
+    const text = labelOf(element);
+    return text.length > 0 && denylist.some((entry) => text.includes(entry));
+  }
+  function clickableOf(element) {
+    return element.querySelector('input[type="checkbox"], input[type="radio"]') ?? element;
+  }
+  function isChecked(element) {
+    return element.classList.contains("mat-mdc-checkbox-checked") || element.classList.contains("mat-checkbox-checked") || element.classList.contains("mat-mdc-radio-checked") || element.querySelector("input:checked") !== null || element.getAttribute("aria-checked") === "true";
+  }
+  function optionElements(path, root = document) {
+    return Array.from(root.querySelectorAll(`[data-testid^="${sfOptionTestIdPrefix(path)}"]`)).filter(
+      (el) => el.dataset.testid !== void 0
+    );
+  }
+  function withoutSentinel(options, path) {
+    const real = options.filter((el) => sfOptionValueFromTestId(path, el.dataset.testid || "") !== "0");
+    return real.length > 0 ? real : options;
+  }
+  async function waitFor(host, probe, timeoutMs, stepMs = 120) {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const found = probe();
+      if (found)
+        return found;
+      await host.wait(stepMs);
+    }
+    return probe() ?? null;
+  }
+  var SchemaFormDriver = class {
+    constructor(host, schema = readCapturedSchema()) {
+      this.host = host;
+      this.schema = schema;
+    }
+    refreshSchema() {
+      this.schema = readCapturedSchema() ?? this.schema;
+    }
+    get hasSchema() {
+      return Boolean(this.schema);
+    }
+    schemaFor(path) {
+      return this.schema ? lookupByCanonicalPath(this.schema, path) : void 0;
+    }
+    widgetOf(element, path) {
+      return widgetIdOf(this.schemaFor(path)) ?? element.getAttribute("data-widget-type") ?? void 0;
+    }
+    /** A second pass must not re-toggle anything already set, but must re-fill a value that is flagged invalid. */
+    isAlreadyFilled(element, tag) {
+      const invalid = element.classList.contains("ng-invalid") || element.closest(".mat-form-field-invalid, .mat-mdc-form-field-invalid, .ng-invalid") !== null;
+      let hasValue;
+      if (tag === "mat-select") {
+        const text = element.querySelector(".mat-select-value-text, .mat-mdc-select-value-text");
+        hasValue = (text?.textContent ?? "").trim().length > 0;
+      } else if (tag === "mat-checkbox") {
+        hasValue = isChecked(element);
+      } else if (tag === "mat-radio-group") {
+        hasValue = element.querySelector(".mat-radio-checked, .mat-mdc-radio-checked, input:checked") !== null;
+      } else {
+        hasValue = Boolean(element.value);
+      }
+      return hasValue && !invalid;
+    }
+    textValueFor(element, path, fallback) {
+      const node = this.schemaFor(path);
+      const heuristic = this.host.resolveText(element, path);
+      if (heuristic && fitsSchema(heuristic, node))
+        return { value: heuristic, detail: "profile" };
+      if (node) {
+        const generated = generateValue(node);
+        if (generated.value)
+          return { value: generated.value, detail: generated.strategy };
+      }
+      return { value: node ? clampToLength(fallback, node) : fallback, detail: "fallback" };
+    }
+    async fillSelect(element, path) {
+      await this.host.closeOverlays();
+      element.click();
+      const node = this.schemaFor(path);
+      const wanted = node?.type === "array" ? Math.max(node.minItems ?? 1, 1) : 1;
+      const panelReady = await waitFor(this.host, () => optionElements(path).length > 0 ? true : null, 3e3);
+      if (!panelReady)
+        throw new Error("no options in panel");
+      const picked = [];
+      for (let i50 = 0; i50 < wanted; i50++) {
+        const remaining = optionElements(path).filter((el) => !picked.includes(sfOptionValueFromTestId(path, el.dataset.testid || "")));
+        if (remaining.length === 0)
+          break;
+        const candidates = withoutSentinel(remaining, path).filter((el) => el.getAttribute("aria-disabled") !== "true");
+        const choice = this.host.chooseOption(candidates.length > 0 ? candidates : remaining, element, path);
+        if (!choice)
+          break;
+        picked.push(sfOptionValueFromTestId(path, choice.dataset.testid || ""));
+        choice.click();
+        await this.host.wait(220);
+      }
+      await this.host.closeOverlays();
+      if (picked.length === 0)
+        throw new Error("no selectable option");
+      return picked.length === 1 ? `option ${picked[0]}` : `options ${picked.join(", ")} (minItems ${wanted})`;
+    }
+    async fillRadio(path) {
+      const options = optionElements(path).filter((el) => el.getAttribute("aria-disabled") !== "true");
+      if (options.length === 0)
+        throw new Error("no radio options found");
+      const root = document.querySelector(`[data-testid="sf-${path}"]`) ?? options[0];
+      const choice = this.host.chooseOption(withoutSentinel(options, path), root, path);
+      if (!choice)
+        throw new Error("no radio option chosen");
+      clickableOf(choice).click();
+      this.host.dispatchEvents(choice);
+      return `option ${sfOptionValueFromTestId(path, choice.dataset.testid || "")}`;
+    }
+    /**
+     * A `type: 'array'` checkbox widget is a GROUP; `minItems` is enforced next to it. Count what is
+     * already checked and add only what is missing — a blind click on pass two would un-check it.
+     */
+    fillCheckboxGroup(path, minItems) {
+      const options = optionElements(path);
+      const need = Math.max(minItems, 1);
+      let checked = options.filter(isChecked).length;
+      if (checked >= need)
+        return { filled: false, detail: `already checked ${checked}/${need}` };
+      const ordered = [...withoutSentinel(options, path), ...options.filter((el) => !withoutSentinel(options, path).includes(el))];
+      for (const option of ordered) {
+        if (checked >= need)
+          break;
+        if (isChecked(option) || isDenied(option, this.host.denylist))
+          continue;
+        clickableOf(option).click();
+        checked++;
+      }
+      return { filled: true, detail: `checked ${checked}/${need} of ${options.length} option(s)` };
+    }
+    async fillFiles(element, path, minItems) {
+      const rows = () => document.querySelectorAll(`[data-testid^="sf-${path}-file-"]`);
+      const need = Math.max(minItems, 1);
+      const existing = rows().length;
+      if (existing >= need)
+        return { filled: false, detail: `already has ${existing}/${need} file(s)` };
+      const input = element.querySelector('input[type="file"]') ?? (element instanceof HTMLInputElement ? element : null);
+      if (!input)
+        return { filled: false, detail: "dropzone has no file input (widget not initialised?)" };
+      for (let uploaded = existing; uploaded < need; uploaded++) {
+        const files = this.host.createUploadFiles();
+        const transfer = new DataTransfer();
+        transfer.items.add(files[0]);
+        input.files = transfer.files;
+        input.dispatchEvent(new Event("change", { bubbles: true }));
+        const appeared = await waitFor(this.host, () => rows().length > uploaded ? true : null, 3e4, 250);
+        if (!appeared)
+          return { filled: false, detail: `upload ${uploaded + 1}/${need} never rendered a file row` };
+      }
+      return { filled: true, detail: `uploaded ${need - existing} file(s), ${rows().length} attached` };
+    }
+    /**
+     * signature_pad ignores `ctx.stroke()`; it records pointer events and `save()` keeps the drawing only
+     * if the stroke holds at least 10 points — hence a many-segment zig-zag of real pointer events.
+     */
+    async fillSignature(element, path) {
+      const canvas = element instanceof HTMLCanvasElement ? element : element.querySelector("canvas");
+      if (!canvas)
+        return { filled: false, detail: "no canvas inside signature widget" };
+      const context = canvas.getContext("2d");
+      if (context && canvas.width > 0 && canvas.height > 0) {
+        const { data } = context.getImageData(0, 0, canvas.width, canvas.height);
+        for (let i50 = 0; i50 < data.length; i50 += 4) {
+          if (data[i50 + 3] > 0 && (data[i50] < 250 || data[i50 + 1] < 250 || data[i50 + 2] < 250)) {
+            return { filled: false, detail: "already signed" };
+          }
+        }
+      }
+      const box = canvas.getBoundingClientRect();
+      if (box.width === 0 || box.height === 0)
+        return { filled: false, detail: "signature canvas has no size" };
+      const points = 16;
+      const left = box.left + box.width * 0.15;
+      const span = box.width * 0.7;
+      const middle = box.top + box.height / 2;
+      const amplitude = box.height * 0.25;
+      const fire = (type, x63, y65, buttons) => canvas.dispatchEvent(
+        new PointerEvent(type, {
+          bubbles: true,
+          cancelable: true,
+          composed: true,
+          pointerId: 1,
+          pointerType: "mouse",
+          isPrimary: true,
+          clientX: x63,
+          clientY: y65,
+          button: type === "pointermove" ? -1 : 0,
+          buttons
+        })
+      );
+      fire("pointerdown", left, middle, 1);
+      for (let i50 = 1; i50 <= points; i50++) {
+        await this.host.wait(12);
+        fire("pointermove", left + span * i50 / points, middle + (i50 % 2 === 0 ? amplitude : -amplitude), 1);
+      }
+      fire("pointerup", left + span, middle, 0);
+      await this.host.wait(150);
+      const root = document.querySelector(`[data-testid="sf-${path}"]`);
+      return root?.classList.contains("required-signature") ? { filled: false, detail: `drew ${points} segments but the widget still reports an invalid signature` } : { filled: true, detail: `drew ${points}-segment stroke` };
+    }
+    async fillDate(element, path) {
+      const input = element instanceof HTMLInputElement ? element : element.querySelector("input");
+      if (!input)
+        throw new Error("date widget has no input");
+      const candidate = this.host.resolveText(element, path);
+      const value = /^\d{4}-\d{2}-\d{2}$/.test(candidate) ? candidate : "2008-05-15";
+      await this.host.fillDate(input, value);
+      return `calendar ${value}`;
+    }
+    async fillText(element, path, isPhone) {
+      const input = element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement ? element : element.querySelector("input, textarea");
+      if (!input)
+        throw new Error("no input inside widget");
+      if (isPhone && input instanceof HTMLInputElement) {
+        await this.host.fillPhone(input);
+        return "phone";
+      }
+      const { value, detail } = this.textValueFor(element, path, "QA Test Value");
+      this.host.setValue(input, value);
+      this.host.dispatchEvents(input);
+      if (input.classList.contains("chip") || (input.getAttribute("class") ?? "").includes("chip")) {
+        input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", code: "Enter", bubbles: true }));
+      }
+      await this.host.wait(30);
+      return input.classList.contains("ng-invalid") ? `${detail} | STILL INVALID with ${JSON.stringify(input.value)}` : detail;
+    }
+    async fillField(element) {
+      const path = sfPathFromTestId(element.dataset.testid ?? "");
+      const tag = element.tagName.toLowerCase();
+      const inputType = element instanceof HTMLInputElement ? element.type || "text" : "";
+      const widget = this.widgetOf(element, path);
+      const strategy = (widget ? WIDGET_STRATEGIES[widget] : void 0) ?? strategyFromTag(tag, inputType);
+      const label = widget ?? `<tag:${tag}>`;
+      const result = (outcome, detail) => ({ path, widget: label, outcome, detail });
+      if (strategy === void 0)
+        return result("skipped", `no fill strategy for widget "${label}" (<${tag}>)`);
+      if (strategy === "container")
+        return result("skipped", "container/non-interactive widget");
+      if (strategy === "unsupported")
+        return result("skipped", `widget "${label}" needs dedicated support`);
+      if (this.isAlreadyFilled(element, tag))
+        return result("skipped", "already filled");
+      if (this.host.dryRun)
+        return result("filled", `dry-run ${strategy}`);
+      try {
+        switch (strategy) {
+          case "select":
+            return result("filled", await this.fillSelect(element, path));
+          case "radio":
+            return result("filled", await this.fillRadio(path));
+          case "checkbox": {
+            if (optionElements(path).length > 0) {
+              const group = this.fillCheckboxGroup(path, this.schemaFor(path)?.minItems ?? 1);
+              return result(group.filled ? "filled" : "skipped", group.detail);
+            }
+            if (isDenied(element, this.host.denylist))
+              return result("skipped", "checkbox label is denylisted");
+            clickableOf(element).click();
+            return result("filled");
+          }
+          case "date":
+            return result("filled", await this.fillDate(element, path));
+          case "signature": {
+            const signature = await this.fillSignature(element, path);
+            return result(signature.filled ? "filled" : "skipped", signature.detail);
+          }
+          case "file": {
+            const upload = await this.fillFiles(element, path, this.schemaFor(path)?.minItems ?? 1);
+            return result(upload.filled ? "filled" : "skipped", upload.detail);
+          }
+          case "range": {
+            const input = element;
+            this.host.setValue(input, input.max || "50");
+            this.host.dispatchEvents(input);
+            return result("filled", "range set to max");
+          }
+          case "numeric": {
+            const node = this.schemaFor(path);
+            const generated = node ? generateValue(node) : void 0;
+            const input = element instanceof HTMLInputElement ? element : element.querySelector("input");
+            if (!input)
+              throw new Error("no input inside widget");
+            this.host.setValue(input, generated?.value || "5");
+            this.host.dispatchEvents(input);
+            return result("filled", generated?.strategy ?? "numeric fallback");
+          }
+          case "phone":
+            return result("filled", await this.fillText(element, path, true));
+          case "text": {
+            const dateLike = widget === void 0 && (element.hasAttribute("ng-reflect-mat-datepicker") || element.getAttribute("readonly") !== null);
+            if (dateLike)
+              return result("filled", await this.fillDate(element, path));
+            return result("filled", await this.fillText(element, path, false));
+          }
+        }
+      } catch (error) {
+        return result("error", error instanceof Error ? error.message : String(error));
+      }
+      return result("skipped", "unhandled strategy");
+    }
+    /** Fills every visible, enabled `sf-*` field currently rendered (one stepper step's worth). */
+    async fillVisibleFields() {
+      const results = [];
+      const candidates = Array.from(document.querySelectorAll(SF_FIELD_ROOT_SELECTOR));
+      for (const element of candidates) {
+        if (!element.isConnected || !isRendered(element) || isDisabledControl(element))
+          continue;
+        await this.host.closeOverlays();
+        results.push(await this.fillField(element));
+      }
+      return results;
+    }
+  };
+  function collectSchemaValidationErrors() {
+    const errors = [];
+    document.querySelectorAll("mat-error").forEach((node) => {
+      if (node.getClientRects().length === 0)
+        return;
+      const message = (node.textContent ?? "").replace(/\s+/g, " ").trim();
+      if (!message)
+        return;
+      let owner = null;
+      for (let parent = node.parentElement; parent && !owner; parent = parent.parentElement) {
+        owner = parent.querySelector('[data-testid^="sf-"]');
+      }
+      const testId = owner?.getAttribute("data-testid") ?? "";
+      errors.push({ path: testId ? sfFieldPathFromAnyTestId(testId) : "<unknown field>", message });
+    });
+    return errors;
+  }
+  function findStepperNextButton() {
+    const buttons = Array.from(document.querySelectorAll('[data-testid="stepper-next-button"]'));
+    return buttons.find((button) => isRendered(button) && !isDisabledControl(button)) ?? null;
+  }
+  function findStepperSubmitButton() {
+    const buttons = Array.from(document.querySelectorAll('[data-testid="applications-form-submit"], [data-testid="fillable-form-submit"]'));
+    return buttons.find((button) => isRendered(button) && !isDisabledControl(button)) ?? null;
   }
 
   // src/contentScript.ts
@@ -6289,6 +7049,16 @@ Try adjusting maxTime or maxRetries parameters for faker.helpers.unique().`);
   var RECENT_NAME_SETS_STORAGE_KEY = "recentNameSets";
   var AUTO_POPUP_HOSTS_KEY = "autoPopupHosts";
   var AUTO_POPUP_ID = "qa-autofill-inline-popup";
+  var LOGIN_POPUP_ID = "qa-autofill-login-popup";
+  var LOGIN_URL_PATTERNS = ["/noauth/login", "/noauth/login/", "/login", "/signin", "/sign-in"];
+  var LOGIN_ROLES = [
+    { label: "School Admin", role: "school_admin", storageKey: "loginEmail_school_admin", defaultEmail: "inkubasiatester+school_admin@gmail.com" },
+    { label: "Org Admin", role: "org_admin", storageKey: "loginEmail_org_admin", defaultEmail: "inkubasiatester+org_admin@gmail.com" },
+    { label: "Editor", role: "editor", storageKey: "loginEmail_editor", defaultEmail: "inkubasiatester+editor@gmail.com" },
+    { label: "User", role: "user", storageKey: "loginEmail_user", defaultEmail: "inkubasiatester+user@gmail.com" }
+  ];
+  var LOGIN_PASSWORD = "123Testertester";
+  var LOGIN_PROD_HOSTS = ["app.enquirytracker.net", "app-us.enquirytracker.net"];
   var DEFAULT_AUTO_POPUP_HOSTS = [
     "app.enquirytracker.net",
     "app-us.enquirytracker.net",
@@ -6301,11 +7071,14 @@ Try adjusting maxTime or maxRetries parameters for faker.helpers.unique().`);
   var KG_DIAL = "+996";
   var KG_LOCAL_PHONE = "777777777";
   var learningListenersAttached = false;
+  var loginPopupDismissed = false;
+  var loginPopupLastUrl = "";
   var currentFormType = "general";
   var currentSettings = null;
   var currentReport = null;
   var currentAddressAutocompleteUsed = false;
   var currentNameSlots = [];
+  var schemaDriver = null;
   var sectionNameDraft = {};
   var SMART_OPTION_RULES = {
     relationship: ["parent", "mother", "father", "guardian"],
@@ -6369,26 +7142,79 @@ Try adjusting maxTime or maxRetries parameters for faker.helpers.unique().`);
     { firstName: "Emily", lastName: "Wilson" },
     { firstName: "Michael", lastName: "Taylor" }
   ];
-  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    if (message.action === "FILL_FORM") {
-      fillForms(
-        message.profileType || "random",
-        message.formType || "general",
-        message.dropdownStrategy || "first",
-        {
-          autoSubmit: Boolean(message.autoSubmit),
-          dryRun: Boolean(message.dryRun),
-          debugMode: Boolean(message.debugMode),
-          toggleDenylist: typeof message.toggleDenylist === "string" ? message.toggleDenylist : DEFAULT_TOGGLE_DENYLIST,
-          fieldOverrides: message.fieldOverrides && typeof message.fieldOverrides === "object" ? message.fieldOverrides : {}
+  try {
+    chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+      if (message.action === "LOGIN_AS") {
+        handleLoginAs(message.email, message.password).then((ok) => sendResponse({ status: ok ? "success" : "not_found" })).catch(() => sendResponse({ status: "error" }));
+        return true;
+      }
+      if (message.action === "FILL_FORM") {
+        fillForms(
+          message.profileType || "random",
+          message.formType || "general",
+          message.dropdownStrategy || "first",
+          {
+            autoSubmit: Boolean(message.autoSubmit),
+            dryRun: Boolean(message.dryRun),
+            debugMode: Boolean(message.debugMode),
+            toggleDenylist: typeof message.toggleDenylist === "string" ? message.toggleDenylist : DEFAULT_TOGGLE_DENYLIST,
+            fieldOverrides: message.fieldOverrides && typeof message.fieldOverrides === "object" ? message.fieldOverrides : {}
+          }
+        ).then((result) => sendResponse({ status: "success", ...result })).catch((error) => {
+          console.error("Autofill failed:", error);
+          sendResponse({ status: "error" });
+        });
+        return true;
+      }
+    });
+  } catch {
+  }
+  async function handleLoginAs(email, password) {
+    const fireEvents = (el, val) => {
+      el.focus();
+      const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set;
+      if (nativeInputValueSetter) {
+        nativeInputValueSetter.call(el, val);
+      } else {
+        el.value = val;
+      }
+      ["input", "change", "blur"].forEach(
+        (evt) => el.dispatchEvent(new Event(evt, { bubbles: true }))
+      );
+    };
+    const findBtn = (name) => {
+      const all = Array.from(document.querySelectorAll("button"));
+      return all.find((b63) => b63.textContent?.trim().toLowerCase() === name.toLowerCase()) ?? null;
+    };
+    const emailInput = document.querySelector('#user-name, [data-testid="auth-login-email"]');
+    if (!emailInput)
+      return false;
+    fireEvents(emailInput, email);
+    await new Promise((r39) => setTimeout(r39, 200));
+    const continueBtn = findBtn("Continue") ?? document.querySelector('[data-testid="auth-login-continue"]');
+    if (!continueBtn)
+      return false;
+    continueBtn.click();
+    const passwordInput = await new Promise((resolve) => {
+      let elapsed = 0;
+      const interval = window.setInterval(() => {
+        const el = document.querySelector('#password, [data-testid="auth-login-password"]');
+        elapsed += 300;
+        if (el || elapsed >= 1e4) {
+          window.clearInterval(interval);
+          resolve(el);
         }
-      ).then((result) => sendResponse({ status: "success", ...result })).catch((error) => {
-        console.error("Autofill failed:", error);
-        sendResponse({ status: "error" });
-      });
-      return true;
-    }
-  });
+      }, 300);
+    });
+    if (!passwordInput)
+      return false;
+    fireEvents(passwordInput, password);
+    await new Promise((r39) => setTimeout(r39, 200));
+    const signInBtn = findBtn("Sign in") ?? document.querySelector('[data-testid="auth-login-submit"]');
+    if (signInBtn)
+      signInBtn.click();
+    return true;
+  }
   function normalizeDropdownStrategy(strategy) {
     if (strategy === "second")
       return "second";
@@ -6405,16 +7231,39 @@ Try adjusting maxTime or maxRetries parameters for faker.helpers.unique().`);
   function wait(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
+  function isExtensionAlive() {
+    try {
+      return Boolean(chrome.runtime?.id);
+    } catch {
+      return false;
+    }
+  }
   function getStorage(keys) {
-    return new Promise((resolve) => chrome.storage.local.get(keys, (result) => resolve(result)));
+    if (!isExtensionAlive())
+      return Promise.resolve({});
+    return new Promise((resolve) => {
+      try {
+        chrome.storage.local.get(keys, (result) => resolve(result));
+      } catch {
+        resolve({});
+      }
+    });
   }
   function setStorage(value) {
-    return new Promise((resolve) => chrome.storage.local.set(value, () => resolve()));
+    if (!isExtensionAlive())
+      return Promise.resolve();
+    return new Promise((resolve) => {
+      try {
+        chrome.storage.local.set(value, () => resolve());
+      } catch {
+        resolve();
+      }
+    });
   }
   function appendReportDetail(message) {
     if (!currentReport)
       return;
-    if (currentReport.details.length < 120) {
+    if (currentReport.details.length < 300) {
       currentReport.details.push(message);
     }
   }
@@ -6504,6 +7353,16 @@ Try adjusting maxTime or maxRetries parameters for faker.helpers.unique().`);
       rawCandidates.push(label);
       const wrapperLabel = element.closest("mat-form-field, .form-group, .field")?.querySelector("label, mat-label")?.textContent || "";
       rawCandidates.push(wrapperLabel);
+      let ancestor = element.parentElement;
+      for (let depth = 0; ancestor && ancestor !== document.body && depth < 8; depth++) {
+        const wrapperControlName = ancestor.getAttribute("formcontrolname");
+        if (wrapperControlName && wrapperControlName !== "val")
+          rawCandidates.push(wrapperControlName);
+        const wrapperHtmlId = ancestor.getAttribute("htmlid");
+        if (wrapperHtmlId)
+          rawCandidates.push(wrapperHtmlId);
+        ancestor = ancestor.parentElement;
+      }
     }
     const normalized = rawCandidates.map((candidate) => normalizeKey(candidate)).filter(Boolean);
     const keyFromFieldName = getFieldKey(fieldName);
@@ -6709,6 +7568,97 @@ Try adjusting maxTime or maxRetries parameters for faker.helpers.unique().`);
   function removeAutoPopup() {
     document.getElementById(AUTO_POPUP_ID)?.remove();
   }
+  function removeLoginPopup() {
+    document.getElementById(LOGIN_POPUP_ID)?.remove();
+  }
+  function isLoginPage() {
+    const path = window.location.pathname.toLowerCase();
+    const host = window.location.hostname.toLowerCase();
+    if (LOGIN_PROD_HOSTS.some((h65) => host === h65))
+      return false;
+    const isTrackedHost = DEFAULT_AUTO_POPUP_HOSTS.some((h65) => host === h65 || host.endsWith(`.${h65}`));
+    if (!isTrackedHost)
+      return false;
+    return LOGIN_URL_PATTERNS.some((pattern) => path.includes(pattern));
+  }
+  function createLoginPopupElement(customEmails = {}) {
+    const popup = document.createElement("div");
+    popup.id = LOGIN_POPUP_ID;
+    popup.style.cssText = [
+      "position:fixed",
+      "top:16px",
+      "right:16px",
+      "z-index:2147483647",
+      "background:#ffffff",
+      "border:1px solid #dbe2ea",
+      "box-shadow:0 8px 24px rgba(25,42,70,0.16)",
+      "border-radius:10px",
+      "padding:12px 14px",
+      "width:280px",
+      "font-family:Arial,sans-serif",
+      "color:#14213d"
+    ].join(";");
+    const btnStyle = "flex:1;border:none;color:#fff;padding:8px 4px;border-radius:6px;cursor:pointer;font-size:11px;background:#1a6fbf;";
+    popup.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+        <strong style="font-size:13px;">QA Login</strong>
+        <button id="qa-login-close" style="border:none;background:transparent;cursor:pointer;font-size:16px;line-height:1;color:#666;">\xD7</button>
+      </div>
+      <div style="font-size:11px;color:#64748b;margin-bottom:10px;">Login page detected. Choose a role:</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">
+        ${LOGIN_ROLES.map((r39) => `<button data-qa-login-role="${r39.role}" style="${btnStyle}">${r39.label}</button>`).join("")}
+      </div>
+      <div id="qa-login-status" style="margin-top:8px;font-size:11px;color:#64748b;min-height:16px;"></div>
+    `;
+    return popup;
+  }
+  async function maybeShowLoginPopup() {
+    if (!document.body)
+      return;
+    const currentUrl = window.location.href;
+    if (!isLoginPage()) {
+      if (loginPopupLastUrl !== currentUrl) {
+        loginPopupDismissed = false;
+        loginPopupLastUrl = currentUrl;
+      }
+      removeLoginPopup();
+      return;
+    }
+    if (loginPopupLastUrl !== currentUrl) {
+      loginPopupDismissed = false;
+      loginPopupLastUrl = currentUrl;
+    }
+    if (loginPopupDismissed)
+      return;
+    if (document.getElementById(LOGIN_POPUP_ID))
+      return;
+    const storageKeys = LOGIN_ROLES.map((r39) => r39.storageKey);
+    const stored = await getStorage(storageKeys);
+    const popup = createLoginPopupElement(stored);
+    document.body.appendChild(popup);
+    popup.querySelector("#qa-login-close")?.addEventListener("click", () => {
+      loginPopupDismissed = true;
+      removeLoginPopup();
+    });
+    popup.querySelectorAll("[data-qa-login-role]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const role = btn.dataset.qaLoginRole;
+        const roleDef = LOGIN_ROLES.find((r39) => r39.role === role);
+        if (!roleDef)
+          return;
+        const email = (stored[roleDef.storageKey] || roleDef.defaultEmail).trim();
+        const statusEl = popup.querySelector("#qa-login-status");
+        btn.disabled = true;
+        if (statusEl)
+          statusEl.textContent = `Logging in as ${roleDef.label}\u2026`;
+        const ok = await handleLoginAs(email, LOGIN_PASSWORD);
+        if (statusEl)
+          statusEl.textContent = ok ? "Done!" : "Login form not found yet.";
+        if (!ok)
+          btn.disabled = false;
+      });
+    });
+  }
   function isTrackedEnquiryTrackerPage(hosts) {
     const host = window.location.hostname.toLowerCase();
     const path = window.location.pathname.toLowerCase();
@@ -6856,7 +7806,25 @@ Try adjusting maxTime or maxRetries parameters for faker.helpers.unique().`);
     const normalized = text.toLowerCase().trim();
     if (!normalized)
       return true;
-    return normalized.startsWith("select") || normalized.startsWith("choose") || normalized.startsWith("please") || normalized.startsWith("none") || normalized === "-";
+    return normalized.startsWith("select") || normalized.startsWith("choose") || normalized.startsWith("please") || normalized.startsWith("none") || normalized.startsWith("no item") || normalized.startsWith("no matching") || normalized === "search" || normalized === "-";
+  }
+  function inferFieldNameFromOptions(optionTexts) {
+    const lower = optionTexts.map((text) => text.toLowerCase().trim());
+    const has = (needle) => lower.some((text) => text.includes(needle));
+    if (has("male") && has("female"))
+      return "gender";
+    if (has("mother") && has("father"))
+      return "relationship";
+    if (has("mr") && has("mrs") || has("mr") && has("ms"))
+      return "salutation";
+    if (has("english") && (has("mandarin") || has("french") || has("spanish") || has("cantonese") || has("arabic")))
+      return "language";
+    if (lower.length <= 4 && has("yes") && has("no"))
+      return "yesno";
+    return "";
+  }
+  function findYesOption(options, textGetter) {
+    return options.find((option) => textGetter(option).toLowerCase().trim().startsWith("yes")) || null;
   }
   function findEnglishOption(options, textGetter) {
     return options.find((option) => {
@@ -7127,7 +8095,7 @@ Try adjusting maxTime or maxRetries parameters for faker.helpers.unique().`);
       dispatchEvents(input);
     }
   }
-  function chooseNativeOption(select, strategy, fieldName, preferredValue) {
+  function chooseNativeOption(select, strategy, fieldName, preferredValue, fieldIdentified = true) {
     const options = Array.from(select.options).filter((option) => !option.disabled && !option.hidden);
     if (options.length === 0)
       return null;
@@ -7141,15 +8109,27 @@ Try adjusting maxTime or maxRetries parameters for faker.helpers.unique().`);
       return !isPlaceholderLike(text);
     });
     const real = candidates.length > 0 ? candidates : options;
-    const english = isLanguageField(fieldName) ? findEnglishOption(real, (option) => option.textContent || "") : null;
+    let effectiveFieldName = fieldName;
+    let inferredYes = null;
+    if (!fieldIdentified) {
+      const inferred = inferFieldNameFromOptions(real.map((option) => option.textContent || ""));
+      if (inferred === "yesno") {
+        inferredYes = findYesOption(real, (option) => option.textContent || "");
+      } else if (inferred) {
+        effectiveFieldName = `${fieldName} ${inferred}`;
+      }
+    }
+    const english = isLanguageField(effectiveFieldName) ? findEnglishOption(real, (option) => option.textContent || "") : null;
     if (english)
       return english;
-    const ranked = findRankedOption(real, fieldName, (option) => option.textContent || "");
+    const ranked = findRankedOption(real, effectiveFieldName, (option) => option.textContent || "");
     if (ranked)
       return ranked;
     const preferred = findPreferredOption(real, preferredValue, (option) => option.textContent || "", (option) => option.value);
     if (preferred)
       return preferred;
+    if (inferredYes)
+      return inferredYes;
     return chooseNodeByStrategy(real, strategy);
   }
   function getMatSelectTriggers() {
@@ -7171,11 +8151,25 @@ Try adjusting maxTime or maxRetries parameters for faker.helpers.unique().`);
         return false;
       if (option.classList.contains("mat-option-disabled") || option.classList.contains("mdc-list-item--disabled"))
         return false;
+      if (option.querySelector("input, ngx-mat-select-search"))
+        return false;
       return !isPlaceholderLike(textForElement(option));
     });
   }
+  function findWebformTestId(element) {
+    const holder = element.closest('[data-testid^="webform-"]');
+    return holder ? holder.getAttribute("data-testid") : null;
+  }
+  function isSchemaManaged(element) {
+    return element.closest('[data-testid^="sf-"]') !== null;
+  }
   function resolveFieldValue(element, fieldName, inputType, profileData, learnedAnswers, learnedContexts, recipe) {
-    const key = getFieldKey(fieldName);
+    const hints = collectFieldHints(element);
+    const scored = resolveFieldKeyFromHints(hints);
+    const webformTestId = findWebformTestId(element);
+    const webformKey = profileKeyForWebformTestId(webformTestId);
+    const key = webformKey || scored?.key || getFieldKey(fieldName);
+    const matchInfo = webformKey ? `${webformKey} (webform-testid="${webformTestId}")` : scored ? `${scored.key} (${scored.source}="${scored.hint.slice(0, 40)}")` : key ? `${key} (legacy)` : "unidentified";
     const candidates = getFieldCandidates(element, fieldName);
     const stepKey = getStepKeyForElement(element);
     const sectionKey = getSectionKeyForElement(element);
@@ -7189,40 +8183,40 @@ Try adjusting maxTime or maxRetries parameters for faker.helpers.unique().`);
       candidates
     );
     if (contextValue) {
-      return { value: contextValue, source: "learned" };
+      return { value: contextValue, source: "learned", key, matchInfo };
     }
     if (key === "firstName" || key === "lastName" || key === "fullName") {
       const slotIndex = getEntityNameSlotIndex(fieldName);
       const selected = currentNameSlots[slotIndex] || currentNameSlots[0];
       if (selected) {
         if (key === "firstName") {
-          return { value: selected.firstName, source: "mapped" };
+          return { value: selected.firstName, source: "mapped", key, matchInfo };
         }
         if (key === "lastName") {
-          return { value: selected.lastName, source: "mapped" };
+          return { value: selected.lastName, source: "mapped", key, matchInfo };
         }
-        return { value: `${selected.firstName} ${selected.lastName}`, source: "mapped" };
+        return { value: `${selected.firstName} ${selected.lastName}`, source: "mapped", key, matchInfo };
       }
     }
     if (key && learnedAnswers[key]) {
-      return { value: learnedAnswers[key], source: "learned" };
+      return { value: learnedAnswers[key], source: "learned", key, matchInfo };
     }
     if (recipe && key && recipe.fieldOverrides[key]) {
-      return { value: recipe.fieldOverrides[key], source: "mapped" };
+      return { value: recipe.fieldOverrides[key], source: "mapped", key, matchInfo };
     }
     if (key && profileData[key]) {
-      return { value: profileData[key], source: "mapped" };
+      return { value: profileData[key], source: "mapped", key, matchInfo };
     }
     for (const candidate of candidates) {
       const guessedKey = getFieldKey(candidate);
       if (guessedKey && learnedAnswers[guessedKey]) {
-        return { value: learnedAnswers[guessedKey], source: "learned" };
+        return { value: learnedAnswers[guessedKey], source: "learned", key: guessedKey, matchInfo };
       }
       if (guessedKey && profileData[guessedKey]) {
-        return { value: profileData[guessedKey], source: "mapped" };
+        return { value: profileData[guessedKey], source: "mapped", key: guessedKey, matchInfo };
       }
     }
-    return { value: getFieldValue(fieldName, profileData, inputType), source: "fallback" };
+    return { value: getFieldValue(key || fieldName, profileData, inputType), source: "fallback", key, matchInfo };
   }
   function highlight(element) {
     element.style.backgroundColor = "#e8f0fe";
@@ -7271,6 +8265,8 @@ Try adjusting maxTime or maxRetries parameters for faker.helpers.unique().`);
       if (input.files && input.files.length > 0) {
         return;
       }
+      if (isSchemaManaged(input))
+        return;
       if (!isDocumentUploadContext(input)) {
         return;
       }
@@ -7325,6 +8321,8 @@ Try adjusting maxTime or maxRetries parameters for faker.helpers.unique().`);
         return;
       if (canvas.closest(".cdk-overlay-container"))
         return;
+      if (isSchemaManaged(canvas))
+        return;
       const contextText = (canvas.closest("section, .step, .mat-step-content, .form-group")?.textContent || "").toLowerCase();
       if (!contextText.includes("signature") && !contextText.includes("sign")) {
         return;
@@ -7363,6 +8361,14 @@ Try adjusting maxTime or maxRetries parameters for faker.helpers.unique().`);
     return positive.some((marker) => text.includes(marker));
   }
   function clickNextStepperButton() {
+    const byTestId = findStepperNextButton();
+    if (byTestId) {
+      if (!currentSettings?.dryRun) {
+        byTestId.click();
+        dispatchEvents(byTestId);
+      }
+      return true;
+    }
     const explicit = Array.from(document.querySelectorAll("[matsteppernext], [cdksteppernext]")).find((button) => isElementVisible(button) && !isElementDisabled(button));
     if (explicit) {
       if (!currentSettings?.dryRun) {
@@ -7432,6 +8438,8 @@ Try adjusting maxTime or maxRetries parameters for faker.helpers.unique().`);
       const isDisabled = matSelect.getAttribute("aria-disabled") === "true" || matSelect.classList.contains("mat-mdc-select-disabled") || matSelect.classList.contains("mat-select-disabled");
       if (isDisabled || !isElementVisible(matSelect))
         continue;
+      if (isSchemaManaged(matSelect))
+        continue;
       const existingValueText = matSelect.querySelector(".mat-select-value-text, .mat-mdc-select-value-text");
       if (existingValueText && existingValueText.textContent && !isPlaceholderLike(existingValueText.textContent.trim())) {
         continue;
@@ -7441,7 +8449,7 @@ Try adjusting maxTime or maxRetries parameters for faker.helpers.unique().`);
         appendReportDetail(`skip ${fieldName}: address autocomplete owns dependent fields`);
         continue;
       }
-      const preferred = resolveFieldValue(
+      const resolved = resolveFieldValue(
         matSelect,
         fieldName,
         "select",
@@ -7449,10 +8457,11 @@ Try adjusting maxTime or maxRetries parameters for faker.helpers.unique().`);
         learnedAnswers,
         learnedContexts,
         recipe
-      ).value;
+      );
+      const preferred = resolved.value;
       if (currentSettings?.dryRun) {
         filled++;
-        appendReportDetail(`dry-run select ${fieldName}`);
+        appendReportDetail(`dry-run select ${resolved.matchInfo}`);
         continue;
       }
       await closeOpenOverlayPanels();
@@ -7465,10 +8474,21 @@ Try adjusting maxTime or maxRetries parameters for faker.helpers.unique().`);
         if (options.length > 0)
           break;
       }
-      const english = isLanguageField(fieldName) ? findEnglishOption(options, textForElement) : null;
-      const ranked = findRankedOption(options, fieldName, textForElement);
+      let effectiveFieldName = fieldName;
+      let inferredYes = null;
+      if (!resolved.key && options.length > 0) {
+        const inferred = inferFieldNameFromOptions(options.map(textForElement));
+        if (inferred === "yesno") {
+          inferredYes = findYesOption(options, textForElement);
+        } else if (inferred) {
+          effectiveFieldName = `${fieldName} ${inferred}`;
+          appendReportDetail(`inferred select type "${inferred}" from options`);
+        }
+      }
+      const english = isLanguageField(effectiveFieldName) ? findEnglishOption(options, textForElement) : null;
+      const ranked = findRankedOption(options, effectiveFieldName, textForElement);
       const preferredOption = findPreferredOption(options, preferred, textForElement);
-      const chosen = english || ranked || preferredOption || chooseNodeByStrategy(options, strategy);
+      const chosen = english || ranked || preferredOption || inferredYes || chooseNodeByStrategy(options, strategy);
       if (!chosen) {
         await closeOpenOverlayPanels();
         continue;
@@ -7512,6 +8532,8 @@ Try adjusting maxTime or maxRetries parameters for faker.helpers.unique().`);
     groups.forEach((group) => {
       if (!isElementVisible(group))
         return;
+      if (isSchemaManaged(group))
+        return;
       const radios = Array.from(group.querySelectorAll('mat-radio-button, [role="radio"], input[type="radio"]')).filter(isElementVisible);
       if (radios.length === 0)
         return;
@@ -7532,7 +8554,7 @@ Try adjusting maxTime or maxRetries parameters for faker.helpers.unique().`);
     return filled;
   }
   function fillStandaloneAriaRadios(strategy) {
-    const radios = Array.from(document.querySelectorAll('[role="radio"]')).filter((radio) => isElementVisible(radio) && radio.getAttribute("aria-disabled") !== "true");
+    const radios = Array.from(document.querySelectorAll('[role="radio"]')).filter((radio) => isElementVisible(radio) && radio.getAttribute("aria-disabled") !== "true" && !isSchemaManaged(radio));
     const groups = /* @__PURE__ */ new Map();
     radios.forEach((radio) => {
       const key = getStandaloneRadioGroupKey(radio);
@@ -7563,6 +8585,8 @@ Try adjusting maxTime or maxRetries parameters for faker.helpers.unique().`);
     toggles.forEach((toggle) => {
       if (toggle.closest('mat-radio-group, [role="radiogroup"]'))
         return;
+      if (isSchemaManaged(toggle))
+        return;
       const isDisabled = toggle.getAttribute("aria-disabled") === "true";
       const ariaChecked = toggle.getAttribute("aria-checked");
       const label = textForElement(toggle).toLowerCase();
@@ -7578,10 +8602,20 @@ Try adjusting maxTime or maxRetries parameters for faker.helpers.unique().`);
     });
     return toggledCount;
   }
+  function getCheckboxLabelText(input) {
+    const labelSource = input.labels && input.labels[0] || input.closest("label") || input.closest("mat-checkbox, .mat-mdc-checkbox, .mat-checkbox, .mdc-checkbox, .checkbox");
+    return labelSource ? textForElement(labelSource).toLowerCase() : "";
+  }
   function fillConsentCheckboxes() {
     let toggled = 0;
-    const nativeCheckboxes = Array.from(document.querySelectorAll('input[type="checkbox"]')).filter((input) => !input.disabled && !input.checked);
+    const denylist = parseDenylist(currentSettings?.toggleDenylist || DEFAULT_TOGGLE_DENYLIST);
+    const nativeCheckboxes = Array.from(document.querySelectorAll('input[type="checkbox"]')).filter((input) => !input.disabled && !input.checked && !isSchemaManaged(input));
     nativeCheckboxes.forEach((input) => {
+      const labelText = getCheckboxLabelText(input);
+      if (labelText && denylist.some((entry) => labelText.includes(entry))) {
+        appendReportDetail(`skip checkbox "${labelText.slice(0, 40)}": denylist`);
+        return;
+      }
       if (currentSettings?.dryRun) {
         toggled++;
         return;
@@ -7598,11 +8632,16 @@ Try adjusting maxTime or maxRetries parameters for faker.helpers.unique().`);
       toggled++;
     });
     const ariaCheckboxes = Array.from(document.querySelectorAll('[role="checkbox"]')).filter(
-      (el) => el.getAttribute("aria-checked") !== "true" && el.getAttribute("aria-disabled") !== "true" && isElementVisible(el)
+      (el) => el.getAttribute("aria-checked") !== "true" && el.getAttribute("aria-disabled") !== "true" && isElementVisible(el) && !isSchemaManaged(el)
     );
     ariaCheckboxes.forEach((checkbox) => {
       if (checkbox.closest('mat-radio-group, [role="radiogroup"]'))
         return;
+      const labelText = textForElement(checkbox).toLowerCase();
+      if (labelText && denylist.some((entry) => labelText.includes(entry))) {
+        appendReportDetail(`skip checkbox "${labelText.slice(0, 40)}": denylist`);
+        return;
+      }
       if (!currentSettings?.dryRun) {
         checkbox.click();
         dispatchEvents(checkbox);
@@ -7614,6 +8653,43 @@ Try adjusting maxTime or maxRetries parameters for faker.helpers.unique().`);
       appendReportDetail(`consent checkboxes toggled: ${toggled}`);
     }
     return toggled;
+  }
+  function describeFieldForReport(element) {
+    const scored = resolveFieldKeyFromHints(collectFieldHints(element));
+    if (scored)
+      return scored.key;
+    const hints = collectFieldHints(element);
+    return hints[0]?.text.slice(0, 50) || element.tagName.toLowerCase();
+  }
+  function collectUnfilledFields() {
+    const unfilled = [];
+    getInputTargets().forEach((input) => {
+      if (input.disabled || !isElementVisible(input) || shouldSkipInputElement(input))
+        return;
+      if (input instanceof HTMLInputElement && (input.type === "checkbox" || input.type === "radio" || input.type === "file"))
+        return;
+      if (!isEmptyValue(input.value || ""))
+        return;
+      unfilled.push(`${describeFieldForReport(input)} [input]`);
+    });
+    document.querySelectorAll("select").forEach((select) => {
+      if (select.disabled || !isElementVisible(select))
+        return;
+      if (select.value && !isPlaceholderLike(select.selectedOptions[0]?.text || ""))
+        return;
+      unfilled.push(`${describeFieldForReport(select)} [select]`);
+    });
+    getMatSelectTriggers().forEach((matSelect) => {
+      if (!isElementVisible(matSelect))
+        return;
+      if (matSelect.getAttribute("aria-disabled") === "true")
+        return;
+      const valueText = matSelect.querySelector(".mat-select-value-text, .mat-mdc-select-value-text");
+      if (valueText && valueText.textContent && !isPlaceholderLike(valueText.textContent.trim()))
+        return;
+      unfilled.push(`${describeFieldForReport(matSelect)} [mat-select]`);
+    });
+    return unfilled;
   }
   function collectInvalidCount() {
     const invalidElements = document.querySelectorAll(
@@ -7632,6 +8708,8 @@ Try adjusting maxTime or maxRetries parameters for faker.helpers.unique().`);
     let filled = 0;
     for (const input of inputs) {
       if (input.disabled)
+        continue;
+      if (isSchemaManaged(input))
         continue;
       if (input.readOnly) {
         const fn = getFieldName(input);
@@ -7685,10 +8763,11 @@ Try adjusting maxTime or maxRetries parameters for faker.helpers.unique().`);
       );
       if (!resolved.value)
         continue;
+      const keyedFieldName = `${resolved.key || ""} ${fieldName}`;
       if (!currentSettings?.dryRun) {
         if (input.readOnly)
           input.readOnly = false;
-        if (input instanceof HTMLInputElement && isPhoneField(fieldName, input)) {
+        if (input instanceof HTMLInputElement && isPhoneField(keyedFieldName, input)) {
           await fillPhoneField(input);
           appendReportDetail(`phone forced to ${KG_DIAL}${KG_LOCAL_PHONE}`);
         } else if (input instanceof HTMLInputElement && isGooglePlacesLikeInput(input) && isAddressLookupField(fieldName)) {
@@ -7699,7 +8778,7 @@ Try adjusting maxTime or maxRetries parameters for faker.helpers.unique().`);
           } else {
             appendReportDetail(`address autocomplete failed \u2014 will fill dependent fields from profile`);
           }
-        } else if (isDateLikeField(fieldName, input)) {
+        } else if (isDateLikeField(keyedFieldName, input)) {
           await fillDateWithCalendar(input, resolved.value);
         } else {
           setElementValue(input, resolved.value);
@@ -7707,7 +8786,7 @@ Try adjusting maxTime or maxRetries parameters for faker.helpers.unique().`);
         dispatchEvents(input);
         highlight(input);
       }
-      appendReportDetail(`fill ${fieldName} via ${resolved.source}`);
+      appendReportDetail(`fill ${resolved.matchInfo} via ${resolved.source}`);
       filled++;
     }
     return filled;
@@ -7718,12 +8797,14 @@ Try adjusting maxTime or maxRetries parameters for faker.helpers.unique().`);
     selects.forEach((select) => {
       if (select.disabled)
         return;
+      if (isSchemaManaged(select))
+        return;
       const fieldName = getFieldName(select);
       if (currentAddressAutocompleteUsed && isAddressDependentField(fieldName)) {
         appendReportDetail(`skip ${fieldName}: address autocomplete owns dependent fields`);
         return;
       }
-      const preferred = resolveFieldValue(
+      const resolved = resolveFieldValue(
         select,
         fieldName,
         "select",
@@ -7731,8 +8812,8 @@ Try adjusting maxTime or maxRetries parameters for faker.helpers.unique().`);
         learnedAnswers,
         learnedContexts,
         recipe
-      ).value;
-      const option = chooseNativeOption(select, strategy, fieldName, preferred);
+      );
+      const option = chooseNativeOption(select, strategy, fieldName, resolved.value, Boolean(resolved.key));
       if (!option)
         return;
       if (!currentSettings?.dryRun) {
@@ -7744,9 +8825,63 @@ Try adjusting maxTime or maxRetries parameters for faker.helpers.unique().`);
     });
     return filled;
   }
+  function buildSchemaHost(profileData, learnedAnswers, learnedContexts, recipe, strategy) {
+    const asField = (element) => element;
+    const resolve = (element, inputType) => resolveFieldValue(asField(element), getFieldName(asField(element)), inputType, profileData, learnedAnswers, learnedContexts, recipe);
+    return {
+      dryRun: Boolean(currentSettings?.dryRun),
+      denylist: parseDenylist(currentSettings?.toggleDenylist || DEFAULT_TOGGLE_DENYLIST),
+      wait,
+      resolveText: (element) => {
+        const input = element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement ? element : element.querySelector("input, textarea");
+        return resolve(input || element, input instanceof HTMLInputElement ? input.type : "text").value;
+      },
+      chooseOption: (options, element, path) => {
+        const fieldName = `${getFieldName(asField(element))} ${path}`;
+        const resolved = resolve(element, "select");
+        const english = isLanguageField(fieldName) ? findEnglishOption(options, textForElement) : null;
+        const ranked = findRankedOption(options, fieldName, textForElement);
+        const preferred = findPreferredOption(options, resolved.value, textForElement);
+        return english || ranked || preferred || chooseNodeByStrategy(options, strategy);
+      },
+      fillPhone: fillPhoneField,
+      fillDate: (input, value) => fillDateWithCalendar(input, value),
+      setValue: setElementValue,
+      dispatchEvents,
+      createUploadFiles: createDefaultUploadFiles,
+      closeOverlays: closeOpenOverlayPanels,
+      note: appendReportDetail
+    };
+  }
+  async function fillSchemaFields() {
+    if (!schemaDriver || !hasSchemaFormFields())
+      return 0;
+    schemaDriver.refreshSchema();
+    const results = await schemaDriver.fillVisibleFields();
+    let filled = 0;
+    results.forEach((result) => {
+      if (currentReport) {
+        if (result.outcome === "filled")
+          currentReport.schemaFields.filled++;
+        else if (result.outcome === "error")
+          currentReport.schemaFields.errors++;
+        else
+          currentReport.schemaFields.skipped++;
+      }
+      if (result.outcome === "filled")
+        filled++;
+      if (result.outcome !== "skipped") {
+        appendReportDetail(`sf ${result.outcome} ${result.path} [${result.widget}]${result.detail ? ` ${result.detail}` : ""}`);
+      }
+    });
+    if (currentReport)
+      currentReport.schemaFields.schemaCaptured = schemaDriver.hasSchema;
+    return filled;
+  }
   async function fillCurrentPage(profileData, learnedAnswers, learnedContexts, recipe, strategy) {
     let filled = 0;
     const denylist = parseDenylist(currentSettings?.toggleDenylist || DEFAULT_TOGGLE_DENYLIST);
+    filled += await fillSchemaFields();
     filled += await fillInputs(profileData, learnedAnswers, learnedContexts, recipe, false);
     filled += fillNativeSelects(profileData, learnedAnswers, learnedContexts, recipe, strategy);
     filled += await fillMaterialSelects(strategy, profileData, learnedAnswers, learnedContexts, recipe);
@@ -7756,6 +8891,7 @@ Try adjusting maxTime or maxRetries parameters for faker.helpers.unique().`);
     filled += fillSignaturePads();
     filled += fillConsentCheckboxes();
     filled += uploadDefaultDocuments();
+    filled += await fillSchemaFields();
     filled += await fillInputs(profileData, learnedAnswers, learnedContexts, recipe, false);
     filled += fillNativeSelects(profileData, learnedAnswers, learnedContexts, recipe, strategy);
     filled += await fillMaterialSelects(strategy, profileData, learnedAnswers, learnedContexts, recipe);
@@ -7763,12 +8899,21 @@ Try adjusting maxTime or maxRetries parameters for faker.helpers.unique().`);
   }
   async function retryInvalidFields(profileData, learnedAnswers, learnedContexts, recipe, strategy) {
     let retried = 0;
+    retried += await fillSchemaFields();
     retried += await fillInputs(profileData, learnedAnswers, learnedContexts, recipe, true);
     retried += fillNativeSelects(profileData, learnedAnswers, learnedContexts, recipe, strategy);
     retried += await fillMaterialSelects(strategy, profileData, learnedAnswers, learnedContexts, recipe);
     return retried;
   }
   function clickSubmitButton() {
+    const byTestId = findStepperSubmitButton();
+    if (byTestId) {
+      if (!currentSettings?.dryRun) {
+        byTestId.click();
+        dispatchEvents(byTestId);
+      }
+      return true;
+    }
     const buttons = Array.from(document.querySelectorAll('button, [role="button"], input[type="submit"], a[role="button"]'));
     const target = buttons.find((button) => {
       if (!isElementVisible(button) || isElementDisabled(button))
@@ -7840,8 +8985,12 @@ Try adjusting maxTime or maxRetries parameters for faker.helpers.unique().`);
       filled: 0,
       retried: 0,
       invalidAfterRetry: 0,
+      unfilledAfterRun: 0,
+      schemaFields: { filled: 0, skipped: 0, errors: 0, schemaCaptured: false },
+      validationErrors: [],
       details: []
     };
+    schemaDriver = new SchemaFormDriver(buildSchemaHost(profileData, learnedAnswers, learnedContexts, matchedRecipe, strategy));
     const { filled, steps } = await fillAllStepperPages(
       profileData,
       learnedAnswers,
@@ -7854,6 +9003,13 @@ Try adjusting maxTime or maxRetries parameters for faker.helpers.unique().`);
     const retried = await retryInvalidFields(profileData, learnedAnswers, learnedContexts, matchedRecipe, strategy);
     currentReport.retried = retried;
     currentReport.invalidAfterRetry = collectInvalidCount();
+    if (!currentSettings.dryRun) {
+      const unfilled = collectUnfilledFields();
+      currentReport.unfilledAfterRun = unfilled.length;
+      unfilled.slice(0, 30).forEach((entry) => appendReportDetail(`unfilled: ${entry}`));
+    }
+    const validationErrors = collectSchemaValidationErrors().map((error) => `${error.path}: ${error.message}`);
+    currentReport.validationErrors = [...new Set(validationErrors)].slice(0, 50);
     if (currentSettings.autoSubmit) {
       const submitted = clickSubmitButton();
       appendReportDetail(submitted ? "auto-submit clicked" : "auto-submit requested but no button found");
@@ -7870,7 +9026,10 @@ Try adjusting maxTime or maxRetries parameters for faker.helpers.unique().`);
     };
   }
   function initAutoPopupWatcher() {
-    const run = () => void maybeShowAutoPopup();
+    const run = () => {
+      void maybeShowAutoPopup();
+      void maybeShowLoginPopup();
+    };
     run();
     if (document.readyState === "loading") {
       document.addEventListener("DOMContentLoaded", run, { once: true });
@@ -7892,6 +9051,12 @@ Try adjusting maxTime or maxRetries parameters for faker.helpers.unique().`);
     };
     let attempts = 0;
     const timer = window.setInterval(() => {
+      if (!isExtensionAlive()) {
+        window.clearInterval(timer);
+        removeAutoPopup();
+        removeLoginPopup();
+        return;
+      }
       attempts++;
       run();
       if (attempts >= 20)

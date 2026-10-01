@@ -1,4 +1,14 @@
-import { buildProfileData, getFieldKey, getFieldName, getFieldValue, type ProfileData } from './utils';
+import { buildProfileData, collectFieldHints, getFieldKey, getFieldName, getFieldValue, resolveFieldKeyFromHints, type ProfileData } from './utils';
+import { profileKeyForWebformTestId } from './testids';
+import {
+    SchemaFormDriver,
+    collectSchemaValidationErrors,
+    findStepperNextButton,
+    findStepperSubmitButton,
+    hasSchemaFormFields,
+    type FieldResult,
+    type SchemaFormHost
+} from './schemaForm';
 
 console.log("QA Form Autofill Content Script Loaded!");
 
@@ -45,6 +55,11 @@ type AutofillReport = {
     filled: number;
     retried: number;
     invalidAfterRetry: number;
+    unfilledAfterRun: number;
+    /** Fields driven through their `sf-*` test id (application / event forms). */
+    schemaFields: { filled: number; skipped: number; errors: number; schemaCaptured: boolean };
+    /** Visible validation errors at the end of the run, attributed to the field path. */
+    validationErrors: string[];
     details: string[];
 };
 
@@ -54,6 +69,16 @@ const LAST_REPORT_STORAGE_KEY = 'lastAutofillReport';
 const RECENT_NAME_SETS_STORAGE_KEY = 'recentNameSets';
 const AUTO_POPUP_HOSTS_KEY = 'autoPopupHosts';
 const AUTO_POPUP_ID = 'qa-autofill-inline-popup';
+const LOGIN_POPUP_ID = 'qa-autofill-login-popup';
+const LOGIN_URL_PATTERNS = ['/noauth/login', '/noauth/login/', '/login', '/signin', '/sign-in'];
+const LOGIN_ROLES: Array<{ label: string; role: string; storageKey: string; defaultEmail: string }> = [
+    { label: 'School Admin', role: 'school_admin', storageKey: 'loginEmail_school_admin', defaultEmail: 'inkubasiatester+school_admin@gmail.com' },
+    { label: 'Org Admin',    role: 'org_admin',    storageKey: 'loginEmail_org_admin',    defaultEmail: 'inkubasiatester+org_admin@gmail.com' },
+    { label: 'Editor',       role: 'editor',       storageKey: 'loginEmail_editor',       defaultEmail: 'inkubasiatester+editor@gmail.com' },
+    { label: 'User',         role: 'user',         storageKey: 'loginEmail_user',         defaultEmail: 'inkubasiatester+user@gmail.com' },
+];
+const LOGIN_PASSWORD = '123Testertester';
+const LOGIN_PROD_HOSTS = ['app.enquirytracker.net', 'app-us.enquirytracker.net'];
 const DEFAULT_AUTO_POPUP_HOSTS = [
     'app.enquirytracker.net',
     'app-us.enquirytracker.net',
@@ -67,11 +92,14 @@ const KG_DIAL = '+996';
 const KG_LOCAL_PHONE = '777777777';
 
 let learningListenersAttached = false;
+let loginPopupDismissed = false;
+let loginPopupLastUrl = '';
 let currentFormType: FormType = 'general';
 let currentSettings: AutofillSettings | null = null;
 let currentReport: AutofillReport | null = null;
 let currentAddressAutocompleteUsed = false;
 let currentNameSlots: NameSet[] = [];
+let schemaDriver: SchemaFormDriver | null = null;
 const sectionNameDraft: Record<string, Partial<NameSet>> = {};
 
 const SMART_OPTION_RULES: Record<string, string[]> = {
@@ -139,7 +167,13 @@ const FALLBACK_NAME_SETS: Array<{ firstName: string; lastName: string }> = [
     { firstName: 'Michael', lastName: 'Taylor' }
 ];
 
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+try { chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (message.action === "LOGIN_AS") {
+        handleLoginAs(message.email as string, message.password as string)
+            .then((ok) => sendResponse({ status: ok ? 'success' : 'not_found' }))
+            .catch(() => sendResponse({ status: 'error' }));
+        return true;
+    }
     if (message.action === "FILL_FORM") {
         fillForms(
             message.profileType || 'random',
@@ -162,7 +196,63 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             });
         return true;
     }
-});
+}); } catch { /* extension context already invalidated on page load */ }
+
+async function handleLoginAs(email: string, password: string): Promise<boolean> {
+    const fireEvents = (el: HTMLInputElement, val: string) => {
+        el.focus();
+        const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+        if (nativeInputValueSetter) {
+            nativeInputValueSetter.call(el, val);
+        } else {
+            el.value = val;
+        }
+        ['input', 'change', 'blur'].forEach((evt) =>
+            el.dispatchEvent(new Event(evt, { bubbles: true }))
+        );
+    };
+
+    const findBtn = (name: string): HTMLButtonElement | null => {
+        const all = Array.from(document.querySelectorAll<HTMLButtonElement>('button'));
+        return all.find((b) => b.textContent?.trim().toLowerCase() === name.toLowerCase()) ?? null;
+    };
+
+    // Step 1: fill email in #user-name
+    const emailInput = document.querySelector<HTMLInputElement>('#user-name, [data-testid="auth-login-email"]');
+    if (!emailInput) return false;
+
+    fireEvents(emailInput, email);
+    await new Promise((r) => setTimeout(r, 200));
+
+    const continueBtn = findBtn('Continue') ??
+        document.querySelector<HTMLButtonElement>('[data-testid="auth-login-continue"]');
+    if (!continueBtn) return false;
+    continueBtn.click();
+
+    // Step 2: wait for password field to appear (up to 10s)
+    const passwordInput = await new Promise<HTMLInputElement | null>((resolve) => {
+        let elapsed = 0;
+        const interval = window.setInterval(() => {
+            const el = document.querySelector<HTMLInputElement>('#password, [data-testid="auth-login-password"]');
+            elapsed += 300;
+            if (el || elapsed >= 10000) {
+                window.clearInterval(interval);
+                resolve(el);
+            }
+        }, 300);
+    });
+
+    if (!passwordInput) return false;
+
+    fireEvents(passwordInput, password);
+    await new Promise((r) => setTimeout(r, 200));
+
+    const signInBtn = findBtn('Sign in') ??
+        document.querySelector<HTMLButtonElement>('[data-testid="auth-login-submit"]');
+    if (signInBtn) signInBtn.click();
+
+    return true;
+}
 
 function normalizeDropdownStrategy(strategy: string): DropdownStrategy {
     if (strategy === 'second') return 'second';
@@ -182,17 +272,39 @@ function wait(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function isExtensionAlive(): boolean {
+    try {
+        return Boolean(chrome.runtime?.id);
+    } catch {
+        return false;
+    }
+}
+
 function getStorage<T>(keys: string[]): Promise<T> {
-    return new Promise((resolve) => chrome.storage.local.get(keys, (result) => resolve(result as T)));
+    if (!isExtensionAlive()) return Promise.resolve({} as T);
+    return new Promise((resolve) => {
+        try {
+            chrome.storage.local.get(keys, (result) => resolve(result as T));
+        } catch {
+            resolve({} as T);
+        }
+    });
 }
 
 function setStorage(value: Record<string, unknown>): Promise<void> {
-    return new Promise((resolve) => chrome.storage.local.set(value, () => resolve()));
+    if (!isExtensionAlive()) return Promise.resolve();
+    return new Promise((resolve) => {
+        try {
+            chrome.storage.local.set(value, () => resolve());
+        } catch {
+            resolve();
+        }
+    });
 }
 
 function appendReportDetail(message: string): void {
     if (!currentReport) return;
-    if (currentReport.details.length < 120) {
+    if (currentReport.details.length < 300) {
         currentReport.details.push(message);
     }
 }
@@ -280,6 +392,16 @@ function getFieldCandidates(element: HTMLInputElement | HTMLTextAreaElement | HT
         rawCandidates.push(label);
         const wrapperLabel = element.closest('mat-form-field, .form-group, .field')?.querySelector('label, mat-label')?.textContent || '';
         rawCandidates.push(wrapperLabel);
+
+        // ET custom wrappers (app-radio-group, app-other-list-item, ...) carry the real identity
+        let ancestor = element.parentElement;
+        for (let depth = 0; ancestor && ancestor !== document.body && depth < 8; depth++) {
+            const wrapperControlName = ancestor.getAttribute('formcontrolname');
+            if (wrapperControlName && wrapperControlName !== 'val') rawCandidates.push(wrapperControlName);
+            const wrapperHtmlId = ancestor.getAttribute('htmlid');
+            if (wrapperHtmlId) rawCandidates.push(wrapperHtmlId);
+            ancestor = ancestor.parentElement;
+        }
     }
 
     const normalized = rawCandidates
@@ -546,6 +668,106 @@ function removeAutoPopup(): void {
     document.getElementById(AUTO_POPUP_ID)?.remove();
 }
 
+function removeLoginPopup(): void {
+    document.getElementById(LOGIN_POPUP_ID)?.remove();
+}
+
+function isLoginPage(): boolean {
+    const path = window.location.pathname.toLowerCase();
+    const host = window.location.hostname.toLowerCase();
+    if (LOGIN_PROD_HOSTS.some((h) => host === h)) return false;
+    const isTrackedHost = DEFAULT_AUTO_POPUP_HOSTS.some((h) => host === h || host.endsWith(`.${h}`));
+    if (!isTrackedHost) return false;
+    return LOGIN_URL_PATTERNS.some((pattern) => path.includes(pattern));
+}
+
+function createLoginPopupElement(customEmails: Record<string, string> = {}): HTMLElement {
+    const popup = document.createElement('div');
+    popup.id = LOGIN_POPUP_ID;
+    popup.style.cssText = [
+        'position:fixed',
+        'top:16px',
+        'right:16px',
+        'z-index:2147483647',
+        'background:#ffffff',
+        'border:1px solid #dbe2ea',
+        'box-shadow:0 8px 24px rgba(25,42,70,0.16)',
+        'border-radius:10px',
+        'padding:12px 14px',
+        'width:280px',
+        'font-family:Arial,sans-serif',
+        'color:#14213d'
+    ].join(';');
+
+    const btnStyle = 'flex:1;border:none;color:#fff;padding:8px 4px;border-radius:6px;cursor:pointer;font-size:11px;background:#1a6fbf;';
+
+    popup.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+        <strong style="font-size:13px;">QA Login</strong>
+        <button id="qa-login-close" style="border:none;background:transparent;cursor:pointer;font-size:16px;line-height:1;color:#666;">×</button>
+      </div>
+      <div style="font-size:11px;color:#64748b;margin-bottom:10px;">Login page detected. Choose a role:</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">
+        ${LOGIN_ROLES.map((r) => `<button data-qa-login-role="${r.role}" style="${btnStyle}">${r.label}</button>`).join('')}
+      </div>
+      <div id="qa-login-status" style="margin-top:8px;font-size:11px;color:#64748b;min-height:16px;"></div>
+    `;
+    return popup;
+}
+
+async function maybeShowLoginPopup(): Promise<void> {
+    if (!document.body) return;
+
+    const currentUrl = window.location.href;
+
+    if (!isLoginPage()) {
+        if (loginPopupLastUrl !== currentUrl) {
+            loginPopupDismissed = false;
+            loginPopupLastUrl = currentUrl;
+        }
+        removeLoginPopup();
+        return;
+    }
+
+    // Reset dismissed flag when URL changes (navigated to login from another page)
+    if (loginPopupLastUrl !== currentUrl) {
+        loginPopupDismissed = false;
+        loginPopupLastUrl = currentUrl;
+    }
+
+    if (loginPopupDismissed) return;
+    if (document.getElementById(LOGIN_POPUP_ID)) return;
+
+    // Read custom emails from storage
+    const storageKeys = LOGIN_ROLES.map((r) => r.storageKey);
+    const stored = await getStorage<Record<string, string>>(storageKeys);
+
+    const popup = createLoginPopupElement(stored);
+    document.body.appendChild(popup);
+
+    popup.querySelector('#qa-login-close')?.addEventListener('click', () => {
+        loginPopupDismissed = true;
+        removeLoginPopup();
+    });
+
+    popup.querySelectorAll<HTMLButtonElement>('[data-qa-login-role]').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+            const role = btn.dataset.qaLoginRole as string;
+            const roleDef = LOGIN_ROLES.find((r) => r.role === role);
+            if (!roleDef) return;
+
+            const email = (stored[roleDef.storageKey] || roleDef.defaultEmail).trim();
+            const statusEl = popup.querySelector<HTMLElement>('#qa-login-status');
+            btn.disabled = true;
+            if (statusEl) statusEl.textContent = `Logging in as ${roleDef.label}…`;
+
+            const ok = await handleLoginAs(email, LOGIN_PASSWORD);
+            if (statusEl) statusEl.textContent = ok ? 'Done!' : 'Login form not found yet.';
+            if (!ok) btn.disabled = false;
+        });
+    });
+}
+
 function isTrackedEnquiryTrackerPage(hosts: string[]): boolean {
     const host = window.location.hostname.toLowerCase();
     const path = window.location.pathname.toLowerCase();
@@ -703,7 +925,27 @@ function isPlaceholderLike(text: string): boolean {
         normalized.startsWith('choose') ||
         normalized.startsWith('please') ||
         normalized.startsWith('none') ||
+        normalized.startsWith('no item') ||
+        normalized.startsWith('no matching') ||
+        normalized === 'search' ||
         normalized === '-';
+}
+
+// Fallback identification for selects/radios whose DOM carries no field identity:
+// classify by what the options themselves look like.
+function inferFieldNameFromOptions(optionTexts: string[]): string {
+    const lower = optionTexts.map((text) => text.toLowerCase().trim());
+    const has = (needle: string) => lower.some((text) => text.includes(needle));
+    if (has('male') && has('female')) return 'gender';
+    if (has('mother') && has('father')) return 'relationship';
+    if ((has('mr') && has('mrs')) || (has('mr') && has('ms'))) return 'salutation';
+    if (has('english') && (has('mandarin') || has('french') || has('spanish') || has('cantonese') || has('arabic'))) return 'language';
+    if (lower.length <= 4 && has('yes') && has('no')) return 'yesno';
+    return '';
+}
+
+function findYesOption<T extends Element>(options: T[], textGetter: (option: T) => string): T | null {
+    return options.find((option) => textGetter(option).toLowerCase().trim().startsWith('yes')) || null;
 }
 
 function findEnglishOption<T extends Element>(options: T[], textGetter: (option: T) => string): T | null {
@@ -863,10 +1105,11 @@ async function fillPlacesAutocompleteField(input: HTMLInputElement, value: strin
 }
 
 function isAddressLookupField(fieldName: string): boolean {
-    const key = (getFieldKey(fieldName) || '').toLowerCase();
     const normalized = normalizeKey(fieldName);
-    const joined = `${key} ${normalized}`;
-    return joined.includes('address') && !joined.includes('emailaddress');
+    // Only trigger Places autocomplete for dedicated lookup fields, not regular address text inputs
+    return normalized.includes('addresslookup') ||
+           normalized.includes('placesearch') ||
+           normalized.includes('address_lookup');
 }
 
 function isAddressDependentField(fieldName: string): boolean {
@@ -1052,7 +1295,8 @@ function chooseNativeOption(
     select: HTMLSelectElement,
     strategy: DropdownStrategy,
     fieldName: string,
-    preferredValue: string
+    preferredValue: string,
+    fieldIdentified = true
 ): HTMLOptionElement | null {
     const options = Array.from(select.options).filter((option) => !option.disabled && !option.hidden);
     if (options.length === 0) return null;
@@ -1066,14 +1310,27 @@ function chooseNativeOption(
     });
     const real = candidates.length > 0 ? candidates : options;
 
-    const english = isLanguageField(fieldName) ? findEnglishOption(real, (option) => option.textContent || '') : null;
+    let effectiveFieldName = fieldName;
+    let inferredYes: HTMLOptionElement | null = null;
+    if (!fieldIdentified) {
+        const inferred = inferFieldNameFromOptions(real.map((option) => option.textContent || ''));
+        if (inferred === 'yesno') {
+            inferredYes = findYesOption(real, (option) => option.textContent || '') as HTMLOptionElement | null;
+        } else if (inferred) {
+            effectiveFieldName = `${fieldName} ${inferred}`;
+        }
+    }
+
+    const english = isLanguageField(effectiveFieldName) ? findEnglishOption(real, (option) => option.textContent || '') : null;
     if (english) return english as HTMLOptionElement;
 
-    const ranked = findRankedOption(real, fieldName, (option) => option.textContent || '');
+    const ranked = findRankedOption(real, effectiveFieldName, (option) => option.textContent || '');
     if (ranked) return ranked as HTMLOptionElement;
 
     const preferred = findPreferredOption(real, preferredValue, (option) => option.textContent || '', (option) => option.value);
     if (preferred) return preferred as HTMLOptionElement;
+
+    if (inferredYes) return inferredYes;
 
     return chooseNodeByStrategy(real, strategy) as HTMLOptionElement | null;
 }
@@ -1094,9 +1351,31 @@ function getMatOptionCandidates(): HTMLElement[] {
         if (!isElementVisible(option)) return false;
         if (option.getAttribute('aria-disabled') === 'true') return false;
         if (option.classList.contains('mat-option-disabled') || option.classList.contains('mdc-list-item--disabled')) return false;
+        // ngx-mat-select-search renders a search input as the first mat-option — never click it
+        if (option.querySelector('input, ngx-mat-select-search')) return false;
         return !isPlaceholderLike(textForElement(option));
     });
 }
+
+// Webform ids sit on the control itself or on a wrapper (col div, mat-select, app-phone-input), so
+// the nearest `webform-*` ancestor is the field's identity.
+function findWebformTestId(element: Element): string | null {
+    const holder = element.closest('[data-testid^="webform-"]');
+    return holder ? holder.getAttribute('data-testid') : null;
+}
+
+// Fields rendered by ngx-schema-form carry `sf-*` ids and are driven by SchemaFormDriver; the
+// heuristic passes must leave them alone or they would re-toggle checkbox groups and re-open selects.
+function isSchemaManaged(element: Element): boolean {
+    return element.closest('[data-testid^="sf-"]') !== null;
+}
+
+type ResolvedField = {
+    value: string;
+    source: FillSource;
+    key: string | null;
+    matchInfo: string;
+};
 
 function resolveFieldValue(
     element: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement,
@@ -1106,8 +1385,17 @@ function resolveFieldValue(
     learnedAnswers: LearnedAnswers,
     learnedContexts: LearnedContextRecord[],
     recipe: FormRecipe | null
-): { value: string; source: FillSource } {
-    const key = getFieldKey(fieldName);
+): ResolvedField {
+    const hints = collectFieldHints(element);
+    const scored = resolveFieldKeyFromHints(hints);
+    const webformTestId = findWebformTestId(element);
+    const webformKey = profileKeyForWebformTestId(webformTestId);
+    const key = webformKey || scored?.key || getFieldKey(fieldName);
+    const matchInfo = webformKey
+        ? `${webformKey} (webform-testid="${webformTestId}")`
+        : scored
+            ? `${scored.key} (${scored.source}="${scored.hint.slice(0, 40)}")`
+            : (key ? `${key} (legacy)` : 'unidentified');
     const candidates = getFieldCandidates(element, fieldName);
     const stepKey = getStepKeyForElement(element);
     const sectionKey = getSectionKeyForElement(element);
@@ -1122,7 +1410,7 @@ function resolveFieldValue(
         candidates
     );
     if (contextValue) {
-        return { value: contextValue, source: 'learned' };
+        return { value: contextValue, source: 'learned', key, matchInfo };
     }
 
     if (key === 'firstName' || key === 'lastName' || key === 'fullName') {
@@ -1130,38 +1418,38 @@ function resolveFieldValue(
         const selected = currentNameSlots[slotIndex] || currentNameSlots[0];
         if (selected) {
             if (key === 'firstName') {
-                return { value: selected.firstName, source: 'mapped' };
+                return { value: selected.firstName, source: 'mapped', key, matchInfo };
             }
             if (key === 'lastName') {
-                return { value: selected.lastName, source: 'mapped' };
+                return { value: selected.lastName, source: 'mapped', key, matchInfo };
             }
-            return { value: `${selected.firstName} ${selected.lastName}`, source: 'mapped' };
+            return { value: `${selected.firstName} ${selected.lastName}`, source: 'mapped', key, matchInfo };
         }
     }
 
     if (key && learnedAnswers[key]) {
-        return { value: learnedAnswers[key], source: 'learned' };
+        return { value: learnedAnswers[key], source: 'learned', key, matchInfo };
     }
 
     if (recipe && key && recipe.fieldOverrides[key]) {
-        return { value: recipe.fieldOverrides[key], source: 'mapped' };
+        return { value: recipe.fieldOverrides[key], source: 'mapped', key, matchInfo };
     }
 
     if (key && profileData[key]) {
-        return { value: profileData[key], source: 'mapped' };
+        return { value: profileData[key], source: 'mapped', key, matchInfo };
     }
 
     for (const candidate of candidates) {
         const guessedKey = getFieldKey(candidate);
         if (guessedKey && learnedAnswers[guessedKey]) {
-            return { value: learnedAnswers[guessedKey], source: 'learned' };
+            return { value: learnedAnswers[guessedKey], source: 'learned', key: guessedKey, matchInfo };
         }
         if (guessedKey && profileData[guessedKey]) {
-            return { value: profileData[guessedKey], source: 'mapped' };
+            return { value: profileData[guessedKey], source: 'mapped', key: guessedKey, matchInfo };
         }
     }
 
-    return { value: getFieldValue(fieldName, profileData, inputType), source: 'fallback' };
+    return { value: getFieldValue(key || fieldName, profileData, inputType), source: 'fallback', key, matchInfo };
 }
 
 function highlight(element: HTMLElement): void {
@@ -1170,6 +1458,7 @@ function highlight(element: HTMLElement): void {
 
 function dispatchEvents(element: HTMLElement) {
     element.dispatchEvent(new Event('input', { bubbles: true }));
+    element.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true }));
     element.dispatchEvent(new Event('change', { bubbles: true }));
     element.dispatchEvent(new Event('blur', { bubbles: true }));
 }
@@ -1226,6 +1515,7 @@ function uploadDefaultDocuments(): number {
         if (input.files && input.files.length > 0) {
             return;
         }
+        if (isSchemaManaged(input)) return;
         if (!isDocumentUploadContext(input)) {
             return;
         }
@@ -1286,6 +1576,7 @@ function fillSignaturePads(): number {
     canvases.forEach((canvas) => {
         if (!isElementVisible(canvas)) return;
         if (canvas.closest('.cdk-overlay-container')) return;
+        if (isSchemaManaged(canvas)) return;
 
         const contextText = (canvas.closest('section, .step, .mat-step-content, .form-group')?.textContent || '').toLowerCase();
         if (!contextText.includes('signature') && !contextText.includes('sign')) {
@@ -1327,6 +1618,15 @@ function isNextStepperButton(element: HTMLElement): boolean {
 }
 
 function clickNextStepperButton(): boolean {
+    const byTestId = findStepperNextButton();
+    if (byTestId) {
+        if (!currentSettings?.dryRun) {
+            byTestId.click();
+            dispatchEvents(byTestId);
+        }
+        return true;
+    }
+
     const explicit = Array.from(document.querySelectorAll<HTMLElement>('[matsteppernext], [cdksteppernext]'))
         .find((button) => isElementVisible(button) && !isElementDisabled(button));
     if (explicit) {
@@ -1412,13 +1712,20 @@ async function fillMaterialSelects(
             matSelect.classList.contains('mat-mdc-select-disabled') ||
             matSelect.classList.contains('mat-select-disabled');
         if (isDisabled || !isElementVisible(matSelect)) continue;
+        if (isSchemaManaged(matSelect)) continue;
+
+        // Bug 1: skip mat-selects that already have a non-placeholder value selected
+        const existingValueText = matSelect.querySelector('.mat-select-value-text, .mat-mdc-select-value-text');
+        if (existingValueText && existingValueText.textContent && !isPlaceholderLike(existingValueText.textContent.trim())) {
+            continue;
+        }
 
         const fieldName = getFieldName(matSelect as unknown as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement);
         if (currentAddressAutocompleteUsed && isAddressDependentField(fieldName)) {
             appendReportDetail(`skip ${fieldName}: address autocomplete owns dependent fields`);
             continue;
         }
-        const preferred = resolveFieldValue(
+        const resolved = resolveFieldValue(
             matSelect as unknown as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement,
             fieldName,
             'select',
@@ -1426,11 +1733,12 @@ async function fillMaterialSelects(
             learnedAnswers,
             learnedContexts,
             recipe
-        ).value;
+        );
+        const preferred = resolved.value;
 
         if (currentSettings?.dryRun) {
             filled++;
-            appendReportDetail(`dry-run select ${fieldName}`);
+            appendReportDetail(`dry-run select ${resolved.matchInfo}`);
             continue;
         }
 
@@ -1439,16 +1747,29 @@ async function fillMaterialSelects(
         dispatchEvents(matSelect);
 
         let options: HTMLElement[] = [];
-        for (let i = 0; i < 10; i++) {
-            await wait(100);
+        for (let i = 0; i < 20; i++) {
+            await wait(150);
             options = getMatOptionCandidates();
             if (options.length > 0) break;
         }
 
-        const english = isLanguageField(fieldName) ? findEnglishOption(options, textForElement) : null;
-        const ranked = findRankedOption(options, fieldName, textForElement);
+        // Unidentified field: try to recognize it by its own options
+        let effectiveFieldName = fieldName;
+        let inferredYes: HTMLElement | null = null;
+        if (!resolved.key && options.length > 0) {
+            const inferred = inferFieldNameFromOptions(options.map(textForElement));
+            if (inferred === 'yesno') {
+                inferredYes = findYesOption(options, textForElement);
+            } else if (inferred) {
+                effectiveFieldName = `${fieldName} ${inferred}`;
+                appendReportDetail(`inferred select type "${inferred}" from options`);
+            }
+        }
+
+        const english = isLanguageField(effectiveFieldName) ? findEnglishOption(options, textForElement) : null;
+        const ranked = findRankedOption(options, effectiveFieldName, textForElement);
         const preferredOption = findPreferredOption(options, preferred, textForElement);
-        const chosen = english || ranked || preferredOption || chooseNodeByStrategy(options, strategy);
+        const chosen = english || ranked || preferredOption || inferredYes || chooseNodeByStrategy(options, strategy);
 
         if (!chosen) {
             await closeOpenOverlayPanels();
@@ -1456,7 +1777,7 @@ async function fillMaterialSelects(
         }
 
         chosen.click();
-        await wait(140);
+        await wait(220);
         await closeOpenOverlayPanels();
         highlight(matSelect);
         filled++;
@@ -1494,6 +1815,7 @@ function fillMaterialRadioGroups(strategy: DropdownStrategy): number {
 
     groups.forEach((group) => {
         if (!isElementVisible(group)) return;
+        if (isSchemaManaged(group)) return;
         const radios = Array.from(group.querySelectorAll<HTMLElement>('mat-radio-button, [role="radio"], input[type="radio"]')).filter(isElementVisible);
         if (radios.length === 0) return;
         const checked = radios.some((item) => item.getAttribute('aria-checked') === 'true' || (item instanceof HTMLInputElement && item.checked));
@@ -1514,7 +1836,7 @@ function fillMaterialRadioGroups(strategy: DropdownStrategy): number {
 
 function fillStandaloneAriaRadios(strategy: DropdownStrategy): number {
     const radios = Array.from(document.querySelectorAll<HTMLElement>('[role="radio"]'))
-        .filter((radio) => isElementVisible(radio) && radio.getAttribute('aria-disabled') !== 'true');
+        .filter((radio) => isElementVisible(radio) && radio.getAttribute('aria-disabled') !== 'true' && !isSchemaManaged(radio));
     const groups = new Map<string, HTMLElement[]>();
     radios.forEach((radio) => {
         const key = getStandaloneRadioGroupKey(radio);
@@ -1545,6 +1867,7 @@ function turnOnAriaToggles(denylist: string[]): number {
 
     toggles.forEach((toggle) => {
         if (toggle.closest('mat-radio-group, [role="radiogroup"]')) return;
+        if (isSchemaManaged(toggle)) return;
         const isDisabled = toggle.getAttribute('aria-disabled') === 'true';
         const ariaChecked = toggle.getAttribute('aria-checked');
         const label = textForElement(toggle).toLowerCase();
@@ -1560,14 +1883,29 @@ function turnOnAriaToggles(denylist: string[]): number {
     return toggledCount;
 }
 
+function getCheckboxLabelText(input: HTMLInputElement): string {
+    const labelSource =
+        (input.labels && input.labels[0]) ||
+        input.closest('label') ||
+        input.closest('mat-checkbox, .mat-mdc-checkbox, .mat-checkbox, .mdc-checkbox, .checkbox');
+    return labelSource ? textForElement(labelSource).toLowerCase() : '';
+}
+
 function fillConsentCheckboxes(): number {
     let toggled = 0;
+    const denylist = parseDenylist(currentSettings?.toggleDenylist || DEFAULT_TOGGLE_DENYLIST);
 
     // 1) Native checkboxes (including hidden inputs used by UI wrappers).
     const nativeCheckboxes = Array.from(document.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'))
-        .filter((input) => !input.disabled && !input.checked);
+        .filter((input) => !input.disabled && !input.checked && !isSchemaManaged(input));
 
     nativeCheckboxes.forEach((input) => {
+        const labelText = getCheckboxLabelText(input);
+        if (labelText && denylist.some((entry) => labelText.includes(entry))) {
+            appendReportDetail(`skip checkbox "${labelText.slice(0, 40)}": denylist`);
+            return;
+        }
+
         if (currentSettings?.dryRun) {
             toggled++;
             return;
@@ -1595,11 +1933,17 @@ function fillConsentCheckboxes(): number {
         .filter((el) =>
             el.getAttribute('aria-checked') !== 'true' &&
             el.getAttribute('aria-disabled') !== 'true' &&
-            isElementVisible(el)
+            isElementVisible(el) &&
+            !isSchemaManaged(el)
         );
 
     ariaCheckboxes.forEach((checkbox) => {
         if (checkbox.closest('mat-radio-group, [role="radiogroup"]')) return;
+        const labelText = textForElement(checkbox).toLowerCase();
+        if (labelText && denylist.some((entry) => labelText.includes(entry))) {
+            appendReportDetail(`skip checkbox "${labelText.slice(0, 40)}": denylist`);
+            return;
+        }
 
         if (!currentSettings?.dryRun) {
             checkbox.click();
@@ -1614,6 +1958,41 @@ function fillConsentCheckboxes(): number {
     }
 
     return toggled;
+}
+
+function describeFieldForReport(element: Element): string {
+    const scored = resolveFieldKeyFromHints(collectFieldHints(element));
+    if (scored) return scored.key;
+    const hints = collectFieldHints(element);
+    return hints[0]?.text.slice(0, 50) || element.tagName.toLowerCase();
+}
+
+// Post-run audit: anything still visibly empty gets reported so gaps are diagnosable.
+function collectUnfilledFields(): string[] {
+    const unfilled: string[] = [];
+
+    getInputTargets().forEach((input) => {
+        if (input.disabled || !isElementVisible(input) || shouldSkipInputElement(input)) return;
+        if (input instanceof HTMLInputElement && (input.type === 'checkbox' || input.type === 'radio' || input.type === 'file')) return;
+        if (!isEmptyValue(input.value || '')) return;
+        unfilled.push(`${describeFieldForReport(input)} [input]`);
+    });
+
+    document.querySelectorAll<HTMLSelectElement>('select').forEach((select) => {
+        if (select.disabled || !isElementVisible(select)) return;
+        if (select.value && !isPlaceholderLike(select.selectedOptions[0]?.text || '')) return;
+        unfilled.push(`${describeFieldForReport(select)} [select]`);
+    });
+
+    getMatSelectTriggers().forEach((matSelect) => {
+        if (!isElementVisible(matSelect)) return;
+        if (matSelect.getAttribute('aria-disabled') === 'true') return;
+        const valueText = matSelect.querySelector('.mat-select-value-text, .mat-mdc-select-value-text');
+        if (valueText && valueText.textContent && !isPlaceholderLike(valueText.textContent.trim())) return;
+        unfilled.push(`${describeFieldForReport(matSelect)} [mat-select]`);
+    });
+
+    return unfilled;
 }
 
 function collectInvalidCount(): number {
@@ -1642,6 +2021,7 @@ async function fillInputs(
 
     for (const input of inputs) {
         if (input.disabled) continue;
+        if (isSchemaManaged(input)) continue;
         if (input.readOnly) {
             // Address-dependent fields (city, country, postal code) can be set readonly
             // by Google Places until a suggestion is picked. When autocomplete failed,
@@ -1697,11 +2077,12 @@ async function fillInputs(
         );
         if (!resolved.value) continue;
 
+        const keyedFieldName = `${resolved.key || ''} ${fieldName}`;
         if (!currentSettings?.dryRun) {
             // Remove readonly before filling if it was allowed through above
             if (input.readOnly) (input as HTMLInputElement).readOnly = false;
 
-            if (input instanceof HTMLInputElement && isPhoneField(fieldName, input)) {
+            if (input instanceof HTMLInputElement && isPhoneField(keyedFieldName, input)) {
                 await fillPhoneField(input);
                 appendReportDetail(`phone forced to ${KG_DIAL}${KG_LOCAL_PHONE}`);
             } else if (input instanceof HTMLInputElement && isGooglePlacesLikeInput(input) && isAddressLookupField(fieldName)) {
@@ -1712,7 +2093,7 @@ async function fillInputs(
                 } else {
                     appendReportDetail(`address autocomplete failed — will fill dependent fields from profile`);
                 }
-            } else if (isDateLikeField(fieldName, input)) {
+            } else if (isDateLikeField(keyedFieldName, input)) {
                 await fillDateWithCalendar(input, resolved.value);
             } else {
                 setElementValue(input, resolved.value);
@@ -1720,7 +2101,7 @@ async function fillInputs(
             dispatchEvents(input);
             highlight(input);
         }
-        appendReportDetail(`fill ${fieldName} via ${resolved.source}`);
+        appendReportDetail(`fill ${resolved.matchInfo} via ${resolved.source}`);
         filled++;
     }
     return filled;
@@ -1737,12 +2118,13 @@ function fillNativeSelects(
     let filled = 0;
     selects.forEach((select) => {
         if (select.disabled) return;
+        if (isSchemaManaged(select)) return;
         const fieldName = getFieldName(select);
         if (currentAddressAutocompleteUsed && isAddressDependentField(fieldName)) {
             appendReportDetail(`skip ${fieldName}: address autocomplete owns dependent fields`);
             return;
         }
-        const preferred = resolveFieldValue(
+        const resolved = resolveFieldValue(
             select,
             fieldName,
             'select',
@@ -1750,8 +2132,8 @@ function fillNativeSelects(
             learnedAnswers,
             learnedContexts,
             recipe
-        ).value;
-        const option = chooseNativeOption(select, strategy, fieldName, preferred);
+        );
+        const option = chooseNativeOption(select, strategy, fieldName, resolved.value, Boolean(resolved.key));
         if (!option) return;
 
         if (!currentSettings?.dryRun) {
@@ -1761,6 +2143,63 @@ function fillNativeSelects(
         }
         filled++;
     });
+    return filled;
+}
+
+function buildSchemaHost(
+    profileData: ProfileData,
+    learnedAnswers: LearnedAnswers,
+    learnedContexts: LearnedContextRecord[],
+    recipe: FormRecipe | null,
+    strategy: DropdownStrategy
+): SchemaFormHost {
+    const asField = (element: HTMLElement) => element as unknown as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
+    const resolve = (element: HTMLElement, inputType: string): ResolvedField =>
+        resolveFieldValue(asField(element), getFieldName(asField(element)), inputType, profileData, learnedAnswers, learnedContexts, recipe);
+
+    return {
+        dryRun: Boolean(currentSettings?.dryRun),
+        denylist: parseDenylist(currentSettings?.toggleDenylist || DEFAULT_TOGGLE_DENYLIST),
+        wait,
+        resolveText: (element) => {
+            const input = element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement ? element : element.querySelector('input, textarea');
+            return resolve((input as HTMLElement) || element, input instanceof HTMLInputElement ? input.type : 'text').value;
+        },
+        chooseOption: (options, element, path) => {
+            const fieldName = `${getFieldName(asField(element))} ${path}`;
+            const resolved = resolve(element, 'select');
+            const english = isLanguageField(fieldName) ? findEnglishOption(options, textForElement) : null;
+            const ranked = findRankedOption(options, fieldName, textForElement);
+            const preferred = findPreferredOption(options, resolved.value, textForElement);
+            return english || ranked || preferred || chooseNodeByStrategy(options, strategy);
+        },
+        fillPhone: fillPhoneField,
+        fillDate: (input, value) => fillDateWithCalendar(input, value),
+        setValue: setElementValue,
+        dispatchEvents,
+        createUploadFiles: createDefaultUploadFiles,
+        closeOverlays: closeOpenOverlayPanels,
+        note: appendReportDetail
+    };
+}
+
+async function fillSchemaFields(): Promise<number> {
+    if (!schemaDriver || !hasSchemaFormFields()) return 0;
+    schemaDriver.refreshSchema();
+    const results: FieldResult[] = await schemaDriver.fillVisibleFields();
+    let filled = 0;
+    results.forEach((result) => {
+        if (currentReport) {
+            if (result.outcome === 'filled') currentReport.schemaFields.filled++;
+            else if (result.outcome === 'error') currentReport.schemaFields.errors++;
+            else currentReport.schemaFields.skipped++;
+        }
+        if (result.outcome === 'filled') filled++;
+        if (result.outcome !== 'skipped') {
+            appendReportDetail(`sf ${result.outcome} ${result.path} [${result.widget}]${result.detail ? ` ${result.detail}` : ''}`);
+        }
+    });
+    if (currentReport) currentReport.schemaFields.schemaCaptured = schemaDriver.hasSchema;
     return filled;
 }
 
@@ -1774,7 +2213,8 @@ async function fillCurrentPage(
     let filled = 0;
     const denylist = parseDenylist(currentSettings?.toggleDenylist || DEFAULT_TOGGLE_DENYLIST);
 
-    // Pass 1: fill what's visible immediately.
+    // Pass 1: fill what's visible immediately. sf-* fields go through their stable test ids first.
+    filled += await fillSchemaFields();
     filled += await fillInputs(profileData, learnedAnswers, learnedContexts, recipe, false);
     filled += fillNativeSelects(profileData, learnedAnswers, learnedContexts, recipe, strategy);
     filled += await fillMaterialSelects(strategy, profileData, learnedAnswers, learnedContexts, recipe);
@@ -1786,6 +2226,7 @@ async function fillCurrentPage(
     filled += uploadDefaultDocuments();
 
     // Pass 2: some controls become visible only after radio/checkbox/select interactions.
+    filled += await fillSchemaFields();
     filled += await fillInputs(profileData, learnedAnswers, learnedContexts, recipe, false);
     filled += fillNativeSelects(profileData, learnedAnswers, learnedContexts, recipe, strategy);
     filled += await fillMaterialSelects(strategy, profileData, learnedAnswers, learnedContexts, recipe);
@@ -1801,6 +2242,7 @@ async function retryInvalidFields(
     strategy: DropdownStrategy
 ): Promise<number> {
     let retried = 0;
+    retried += await fillSchemaFields();
     retried += await fillInputs(profileData, learnedAnswers, learnedContexts, recipe, true);
     retried += fillNativeSelects(profileData, learnedAnswers, learnedContexts, recipe, strategy);
     retried += await fillMaterialSelects(strategy, profileData, learnedAnswers, learnedContexts, recipe);
@@ -1808,6 +2250,15 @@ async function retryInvalidFields(
 }
 
 function clickSubmitButton(): boolean {
+    const byTestId = findStepperSubmitButton();
+    if (byTestId) {
+        if (!currentSettings?.dryRun) {
+            byTestId.click();
+            dispatchEvents(byTestId);
+        }
+        return true;
+    }
+
     const buttons = Array.from(document.querySelectorAll<HTMLElement>('button, [role="button"], input[type="submit"], a[role="button"]'));
     const target = buttons.find((button) => {
         if (!isElementVisible(button) || isElementDisabled(button)) return false;
@@ -1838,7 +2289,7 @@ async function fillAllStepperPages(
         if (!moved) break;
         traversed++;
         await waitForStepperTransition();
-        await wait(250);
+        await wait(500);
     }
     return { filled: totalFilled, steps: traversed };
 }
@@ -1892,8 +2343,13 @@ async function fillForms(
         filled: 0,
         retried: 0,
         invalidAfterRetry: 0,
+        unfilledAfterRun: 0,
+        schemaFields: { filled: 0, skipped: 0, errors: 0, schemaCaptured: false },
+        validationErrors: [],
         details: []
     };
+
+    schemaDriver = new SchemaFormDriver(buildSchemaHost(profileData, learnedAnswers, learnedContexts, matchedRecipe, strategy));
 
     const { filled, steps } = await fillAllStepperPages(
         profileData,
@@ -1908,6 +2364,15 @@ async function fillForms(
     const retried = await retryInvalidFields(profileData, learnedAnswers, learnedContexts, matchedRecipe, strategy);
     currentReport.retried = retried;
     currentReport.invalidAfterRetry = collectInvalidCount();
+
+    if (!currentSettings.dryRun) {
+        const unfilled = collectUnfilledFields();
+        currentReport.unfilledAfterRun = unfilled.length;
+        unfilled.slice(0, 30).forEach((entry) => appendReportDetail(`unfilled: ${entry}`));
+    }
+
+    const validationErrors = collectSchemaValidationErrors().map((error) => `${error.path}: ${error.message}`);
+    currentReport.validationErrors = [...new Set(validationErrors)].slice(0, 50);
 
     if (currentSettings.autoSubmit) {
         const submitted = clickSubmitButton();
@@ -1927,7 +2392,10 @@ async function fillForms(
 }
 
 function initAutoPopupWatcher(): void {
-    const run = () => void maybeShowAutoPopup();
+    const run = () => {
+        void maybeShowAutoPopup();
+        void maybeShowLoginPopup();
+    };
     run();
 
     if (document.readyState === 'loading') {
@@ -1953,6 +2421,12 @@ function initAutoPopupWatcher(): void {
 
     let attempts = 0;
     const timer = window.setInterval(() => {
+        if (!isExtensionAlive()) {
+            window.clearInterval(timer);
+            removeAutoPopup();
+            removeLoginPopup();
+            return;
+        }
         attempts++;
         run();
         if (attempts >= 20) window.clearInterval(timer);

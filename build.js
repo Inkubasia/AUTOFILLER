@@ -34,7 +34,7 @@ if (!fs.existsSync(iconsOutDir)) fs.mkdirSync(iconsOutDir, { recursive: true });
 
 // Build TypeScript
 esbuild.build({
-    entryPoints: ['src/background.ts', 'src/contentScript.ts', 'src/popup.ts'],
+    entryPoints: ['src/background.ts', 'src/contentScript.ts', 'src/popup.ts', 'src/pageHook.ts'],
     bundle: true,
     outdir: outdir,
     target: ['chrome100'],

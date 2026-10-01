@@ -19,6 +19,30 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const DEFAULT_DENYLIST = 'none,no,not applicable,prefer not,decline';
 
+    const LOGIN_EMAIL_KEYS = [
+        'loginEmail_school_admin',
+        'loginEmail_org_admin',
+        'loginEmail_editor',
+        'loginEmail_user',
+    ];
+
+    const loginEmailInputs = document.querySelectorAll<HTMLInputElement>('[data-login-email-key]');
+
+    // Load saved login emails
+    chrome.storage.local.get(LOGIN_EMAIL_KEYS, (result) => {
+        loginEmailInputs.forEach((input) => {
+            const key = input.dataset.loginEmailKey as string;
+            if (result[key]) input.value = result[key] as string;
+        });
+    });
+
+    loginEmailInputs.forEach((input) => {
+        input.addEventListener('blur', () => {
+            const key = input.dataset.loginEmailKey as string;
+            chrome.storage.local.set({ [key]: input.value.trim() });
+        });
+    });
+
     const normalizeOverrideKey = (key: string): string => {
         const normalized = key.trim().toLowerCase();
         if (normalized === 'name' || normalized === 'firstname' || normalized === 'first_name') return 'firstName';
@@ -132,6 +156,32 @@ document.addEventListener('DOMContentLoaded', () => {
         chrome.storage.local.set({ selectedToggleDenylist: toggleDenylistInput.value || DEFAULT_DENYLIST });
     });
     fieldOverridesInput.addEventListener('blur', saveFieldOverrides);
+
+    const LOGIN_CREDS: Record<string, { email: string; password: string }> = {
+        school_admin: { email: 'inkubasiatester+school_admin@gmail.com', password: '123Testertester' },
+        org_admin:    { email: 'inkubasiatester+org_admin@gmail.com',    password: '123Testertester' },
+        editor:       { email: 'inkubasiatester+editor@gmail.com',       password: '123Testertester' },
+        user:         { email: 'inkubasiatester+user@gmail.com',         password: '123Testertester' },
+    };
+
+    document.querySelectorAll<HTMLButtonElement>('.login-btn').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            const role = btn.dataset.role as string;
+            const creds = LOGIN_CREDS[role];
+            if (!creds) return;
+
+            chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+                const activeTab = tabs[0];
+                if (activeTab && activeTab.id) {
+                    chrome.tabs.sendMessage(activeTab.id, {
+                        action: 'LOGIN_AS',
+                        email: creds.email,
+                        password: creds.password
+                    });
+                }
+            });
+        });
+    });
 
     fillBtn.addEventListener('click', () => {
         const fieldOverrides = parseFieldOverrides(fieldOverridesInput.value || '');

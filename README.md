@@ -62,6 +62,18 @@ Chrome-расширение для автозаполнения форм Enquiry
 3. Выберите режим (если нужно) и нажмите `Fill Form`.
 4. При необходимости включите `Debug` для отчета последнего прогона.
 
+## Стабильные test id (ET-10135 и далее)
+- **Application / event формы (`sf-<path>`)**: поля, у которых есть `data-testid="sf-<canonicalPath>"`, заполняет `src/schemaForm.ts`, а не эвристики.
+  - JSON-схема формы перехватывается `src/pageHook.ts` (MAIN world, ответ `GET .../fillable-form/...`). Из неё берутся pattern, длины, `minItems` и границы чисел.
+  - Опции выбираются по `sf-<path>-option-<enum>`, enum `0` ("Other..") пропускается. Multi-select добирает `minItems`, группы чекбоксов считаются, а не кликаются все подряд.
+  - Подпись рисуется настоящими pointer-событиями (`signature_pad` игнорирует `ctx.stroke`), файлы ждут появления строки `sf-<path>-file-*`.
+  - Степпер идёт по `stepper-next-button`, сабмит по `applications-form-submit` / `fillable-form-submit`.
+  - Эвристические проходы пропускают всё внутри `[data-testid^="sf-"]`.
+- **Webform'ы (`webform-<form>-<field>`)**: `src/testids.ts` явно сопоставляет slug с ключом профиля (`WEBFORM_SLUG_TO_PROFILE_KEY`), в том числе для блока contact2. Неизвестные поля идут через старый резолвер.
+- В отчёте (`Debug`) появились `schemaFields` (filled / skipped / errors / schemaCaptured) и `validationErrors` с путём поля.
+- Тесты чистой логики: `npm test`. Проверка типов: `npm run typecheck`.
+- Не покрыто: оплата (`payment`, нужен Stripe test key), формы во встроенном iframe (`.et-widget`).
+
 ## Примечания
 - Проверочные коды (например verification code/captcha) обычно нужно вводить вручную.
 - Расширение сохраняет обученные значения в `chrome.storage.local`.

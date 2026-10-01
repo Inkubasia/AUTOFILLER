@@ -20,6 +20,16 @@
                 "<all_urls>"
             ],
             "js": [
+                "pageHook.js"
+            ],
+            "run_at": "document_start",
+            "world": "MAIN"
+        },
+        {
+            "matches": [
+                "<all_urls>"
+            ],
+            "js": [
                 "contentScript.js"
             ],
             "run_at": "document_idle"

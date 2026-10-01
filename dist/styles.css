@@ -186,6 +186,22 @@ textarea:focus {
   color: #aaa;
 }
 
+.login-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.login-btn {
+  background-color: #1a6fbf;
+  font-size: 8px;
+  padding: 8px 4px;
+}
+
+.login-btn:hover {
+  background-color: #2a7fcf;
+}
+
 .footer {
   text-align: center;
   color: #777;
