@@ -71,14 +71,23 @@ const AUTO_POPUP_HOSTS_KEY = 'autoPopupHosts';
 const AUTO_POPUP_ID = 'qa-autofill-inline-popup';
 const LOGIN_POPUP_ID = 'qa-autofill-login-popup';
 const LOGIN_URL_PATTERNS = ['/noauth/login', '/noauth/login/', '/login', '/signin', '/sign-in'];
-const LOGIN_ROLES: Array<{ label: string; role: string; storageKey: string; defaultEmail: string }> = [
-    { label: 'School Admin', role: 'school_admin', storageKey: 'loginEmail_school_admin', defaultEmail: 'inkubasiatester+school_admin@gmail.com' },
-    { label: 'Org Admin',    role: 'org_admin',    storageKey: 'loginEmail_org_admin',    defaultEmail: 'inkubasiatester+org_admin@gmail.com' },
-    { label: 'Editor',       role: 'editor',       storageKey: 'loginEmail_editor',       defaultEmail: 'inkubasiatester+editor@gmail.com' },
-    { label: 'User',         role: 'user',         storageKey: 'loginEmail_user',         defaultEmail: 'inkubasiatester+user@gmail.com' },
+const LOGIN_ROLES: Array<{ label: string; role: string; defaultEmail: string }> = [
+    { label: 'School Admin', role: 'school_admin', defaultEmail: 'inkubasiatester+school_admin@gmail.com' },
+    { label: 'Org Admin',    role: 'org_admin',    defaultEmail: 'inkubasiatester+org_admin@gmail.com' },
+    { label: 'Editor',       role: 'editor',       defaultEmail: 'inkubasiatester+editor@gmail.com' },
+    { label: 'User',         role: 'user',         defaultEmail: 'inkubasiatester+user@gmail.com' },
 ];
-const LOGIN_PASSWORD = '123Testertester';
-const LOGIN_PROD_HOSTS = ['app.enquirytracker.net', 'app-us.enquirytracker.net'];
+const LOGIN_DEFAULT_PASSWORD = '123Testertester';
+// Hostname -> environment key. Credentials are stored per env: loginCreds_<env>_<role> = { email, password }
+const LOGIN_ENV_HOSTS: Record<string, string> = {
+    'dev.enquirytracker.net': 'dev',
+    'staging.enquirytracker.net': 'staging',
+    'app.enquirytracker.net': 'app',
+    'app-us.enquirytracker.net': 'app-us',
+};
+// Defaults only for non-prod envs; prod (app, app-us) accounts must be set by the user in the popup settings.
+const LOGIN_ENVS_WITH_DEFAULTS = ['dev', 'staging'];
+type LoginCreds = { email: string; password: string };
 const DEFAULT_AUTO_POPUP_HOSTS = [
     'app.enquirytracker.net',
     'app-us.enquirytracker.net',
@@ -93,7 +102,6 @@ const KG_LOCAL_PHONE = '777777777';
 
 let learningListenersAttached = false;
 let loginPopupDismissed = false;
-let loginPopupLastUrl = '';
 let currentFormType: FormType = 'general';
 let currentSettings: AutofillSettings | null = null;
 let currentReport: AutofillReport | null = null;
@@ -169,8 +177,10 @@ const FALLBACK_NAME_SETS: Array<{ firstName: string; lastName: string }> = [
 
 try { chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.action === "LOGIN_AS") {
-        handleLoginAs(message.email as string, message.password as string)
-            .then((ok) => sendResponse({ status: ok ? 'success' : 'not_found' }))
+        const env = getLoginEnv();
+        (env ? resolveLoginCreds(env, message.role as string) : Promise.resolve(null))
+            .then((creds) => creds ? handleLoginAs(creds.email, creds.password) : Promise.resolve<boolean | null>(null))
+            .then((ok) => sendResponse({ status: ok === null ? 'no_creds' : ok ? 'success' : 'not_found' }))
             .catch(() => sendResponse({ status: 'error' }));
         return true;
     }
@@ -668,20 +678,36 @@ function removeAutoPopup(): void {
     document.getElementById(AUTO_POPUP_ID)?.remove();
 }
 
+function getLoginEnv(): string | null {
+    const host = window.location.hostname.toLowerCase();
+    for (const [h, env] of Object.entries(LOGIN_ENV_HOSTS)) {
+        if (host === h || host.endsWith(`.${h}`)) return env;
+    }
+    return null;
+}
+
+async function resolveLoginCreds(env: string, role: string): Promise<LoginCreds | null> {
+    const key = `loginCreds_${env}_${role}`;
+    const stored = (await getStorage<Record<string, LoginCreds | undefined>>([key]))[key];
+    const def = LOGIN_ROLES.find((r) => r.role === role);
+    const useDefaults = LOGIN_ENVS_WITH_DEFAULTS.includes(env);
+    const email = (stored?.email || (useDefaults ? def?.defaultEmail : '') || '').trim();
+    const password = stored?.password || (useDefaults ? LOGIN_DEFAULT_PASSWORD : '');
+    if (!email || !password) return null;
+    return { email, password };
+}
+
 function removeLoginPopup(): void {
-    document.getElementById(LOGIN_POPUP_ID)?.remove();
+    document.querySelectorAll(`#${LOGIN_POPUP_ID}`).forEach((el) => el.remove());
 }
 
 function isLoginPage(): boolean {
+    if (!getLoginEnv()) return false;
     const path = window.location.pathname.toLowerCase();
-    const host = window.location.hostname.toLowerCase();
-    if (LOGIN_PROD_HOSTS.some((h) => host === h)) return false;
-    const isTrackedHost = DEFAULT_AUTO_POPUP_HOSTS.some((h) => host === h || host.endsWith(`.${h}`));
-    if (!isTrackedHost) return false;
     return LOGIN_URL_PATTERNS.some((pattern) => path.includes(pattern));
 }
 
-function createLoginPopupElement(customEmails: Record<string, string> = {}): HTMLElement {
+function createLoginPopupElement(env: string): HTMLElement {
     const popup = document.createElement('div');
     popup.id = LOGIN_POPUP_ID;
     popup.style.cssText = [
@@ -706,7 +732,7 @@ function createLoginPopupElement(customEmails: Record<string, string> = {}): HTM
         <strong style="font-size:13px;">QA Login</strong>
         <button id="qa-login-close" style="border:none;background:transparent;cursor:pointer;font-size:16px;line-height:1;color:#666;">×</button>
       </div>
-      <div style="font-size:11px;color:#64748b;margin-bottom:10px;">Login page detected. Choose a role:</div>
+      <div style="font-size:11px;color:#64748b;margin-bottom:10px;">Login page detected (${env}). Choose a role:</div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">
         ${LOGIN_ROLES.map((r) => `<button data-qa-login-role="${r.role}" style="${btnStyle}">${r.label}</button>`).join('')}
       </div>
@@ -715,34 +741,23 @@ function createLoginPopupElement(customEmails: Record<string, string> = {}): HTM
     return popup;
 }
 
-async function maybeShowLoginPopup(): Promise<void> {
+function maybeShowLoginPopup(): void {
     if (!document.body) return;
 
-    const currentUrl = window.location.href;
-
     if (!isLoginPage()) {
-        if (loginPopupLastUrl !== currentUrl) {
-            loginPopupDismissed = false;
-            loginPopupLastUrl = currentUrl;
-        }
+        // Left the login page: next visit shows the popup again.
+        loginPopupDismissed = false;
         removeLoginPopup();
         return;
     }
 
-    // Reset dismissed flag when URL changes (navigated to login from another page)
-    if (loginPopupLastUrl !== currentUrl) {
-        loginPopupDismissed = false;
-        loginPopupLastUrl = currentUrl;
-    }
+    const env = getLoginEnv();
+    if (!env) return;
 
-    if (loginPopupDismissed) return;
-    if (document.getElementById(LOGIN_POPUP_ID)) return;
-
-    // Read custom emails from storage
-    const storageKeys = LOGIN_ROLES.map((r) => r.storageKey);
-    const stored = await getStorage<Record<string, string>>(storageKeys);
-
-    const popup = createLoginPopupElement(stored);
+    // Re-check after any await: concurrent run() calls would otherwise append duplicate popups
+    // and the close button would only remove one of them.
+    if (document.getElementById(LOGIN_POPUP_ID) || loginPopupDismissed) return;
+    const popup = createLoginPopupElement(env);
     document.body.appendChild(popup);
 
     popup.querySelector('#qa-login-close')?.addEventListener('click', () => {
@@ -756,12 +771,16 @@ async function maybeShowLoginPopup(): Promise<void> {
             const roleDef = LOGIN_ROLES.find((r) => r.role === role);
             if (!roleDef) return;
 
-            const email = (stored[roleDef.storageKey] || roleDef.defaultEmail).trim();
             const statusEl = popup.querySelector<HTMLElement>('#qa-login-status');
+            const creds = await resolveLoginCreds(env, role);
+            if (!creds) {
+                if (statusEl) statusEl.textContent = `No ${env} account set. Open extension > Login Accounts.`;
+                return;
+            }
             btn.disabled = true;
             if (statusEl) statusEl.textContent = `Logging in as ${roleDef.label}…`;
 
-            const ok = await handleLoginAs(email, LOGIN_PASSWORD);
+            const ok = await handleLoginAs(creds.email, creds.password);
             if (statusEl) statusEl.textContent = ok ? 'Done!' : 'Login form not found yet.';
             if (!ok) btn.disabled = false;
         });

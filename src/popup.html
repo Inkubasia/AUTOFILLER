@@ -28,27 +28,28 @@
       </select>
     </div>
 
-    <div class="form-group">
-      <label>Login as:</label>
-      <div class="login-grid">
-        <button class="btn login-btn" data-role="school_admin">School Admin</button>
-        <button class="btn login-btn" data-role="org_admin">Org Admin</button>
-        <button class="btn login-btn" data-role="editor">Editor</button>
-        <button class="btn login-btn" data-role="user">User</button>
-      </div>
-    </div>
-
     <details class="dropdown-panel">
-      <summary>Login Emails</summary>
+      <summary>Login Accounts</summary>
       <div class="dropdown-content">
-        <label for="emailSchoolAdmin">School Admin:</label>
-        <input id="emailSchoolAdmin" type="text" data-login-email-key="loginEmail_school_admin" placeholder="inkubasiatester+school_admin@gmail.com">
-        <label for="emailOrgAdmin">Org Admin:</label>
-        <input id="emailOrgAdmin" type="text" data-login-email-key="loginEmail_org_admin" placeholder="inkubasiatester+org_admin@gmail.com">
-        <label for="emailEditor">Editor:</label>
-        <input id="emailEditor" type="text" data-login-email-key="loginEmail_editor" placeholder="inkubasiatester+editor@gmail.com">
-        <label for="emailUser">User:</label>
-        <input id="emailUser" type="text" data-login-email-key="loginEmail_user" placeholder="inkubasiatester+user@gmail.com">
+        <label for="loginEnvSelect">Environment:</label>
+        <select id="loginEnvSelect">
+          <option value="dev">dev</option>
+          <option value="staging">staging</option>
+          <option value="app">app</option>
+          <option value="app-us">app-us</option>
+        </select>
+        <label>School Admin:</label>
+        <input type="text" data-login-role="school_admin" data-login-field="email" placeholder="email">
+        <input type="password" data-login-role="school_admin" data-login-field="password" placeholder="password" autocomplete="off">
+        <label>Org Admin:</label>
+        <input type="text" data-login-role="org_admin" data-login-field="email" placeholder="email">
+        <input type="password" data-login-role="org_admin" data-login-field="password" placeholder="password" autocomplete="off">
+        <label>Editor:</label>
+        <input type="text" data-login-role="editor" data-login-field="email" placeholder="email">
+        <input type="password" data-login-role="editor" data-login-field="password" placeholder="password" autocomplete="off">
+        <label>User:</label>
+        <input type="text" data-login-role="user" data-login-field="email" placeholder="email">
+        <input type="password" data-login-role="user" data-login-field="password" placeholder="password" autocomplete="off">
       </div>
     </details>
 

@@ -19,29 +19,37 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const DEFAULT_DENYLIST = 'none,no,not applicable,prefer not,decline';
 
-    const LOGIN_EMAIL_KEYS = [
-        'loginEmail_school_admin',
-        'loginEmail_org_admin',
-        'loginEmail_editor',
-        'loginEmail_user',
-    ];
+    const LOGIN_ROLE_KEYS = ['school_admin', 'org_admin', 'editor', 'user'];
+    const loginEnvSelect = document.getElementById('loginEnvSelect') as HTMLSelectElement;
+    const loginCredInputs = document.querySelectorAll<HTMLInputElement>('[data-login-role][data-login-field]');
+    const credsKey = (env: string, role: string) => `loginCreds_${env}_${role}`;
 
-    const loginEmailInputs = document.querySelectorAll<HTMLInputElement>('[data-login-email-key]');
-
-    // Load saved login emails
-    chrome.storage.local.get(LOGIN_EMAIL_KEYS, (result) => {
-        loginEmailInputs.forEach((input) => {
-            const key = input.dataset.loginEmailKey as string;
-            if (result[key]) input.value = result[key] as string;
+    // Load saved credentials of the selected env into the inputs
+    const loadLoginCreds = () => {
+        const env = loginEnvSelect.value;
+        const keys = LOGIN_ROLE_KEYS.map((r) => credsKey(env, r));
+        chrome.storage.local.get(keys, (result) => {
+            loginCredInputs.forEach((input) => {
+                const creds = result[credsKey(env, input.dataset.loginRole as string)] as { email?: string; password?: string } | undefined;
+                input.value = creds?.[input.dataset.loginField as 'email' | 'password'] ?? '';
+            });
         });
-    });
+    };
 
-    loginEmailInputs.forEach((input) => {
-        input.addEventListener('blur', () => {
-            const key = input.dataset.loginEmailKey as string;
-            chrome.storage.local.set({ [key]: input.value.trim() });
+    const saveLoginCreds = () => {
+        const env = loginEnvSelect.value;
+        const payload: Record<string, { email: string; password: string }> = {};
+        LOGIN_ROLE_KEYS.forEach((role) => {
+            const get = (field: string) =>
+                (document.querySelector<HTMLInputElement>(`[data-login-role="${role}"][data-login-field="${field}"]`)?.value ?? '');
+            payload[credsKey(env, role)] = { email: get('email').trim(), password: get('password') };
         });
-    });
+        chrome.storage.local.set(payload);
+    };
+
+    loginEnvSelect.addEventListener('change', loadLoginCreds);
+    loginCredInputs.forEach((input) => input.addEventListener('blur', saveLoginCreds));
+    loadLoginCreds();
 
     const normalizeOverrideKey = (key: string): string => {
         const normalized = key.trim().toLowerCase();
@@ -156,32 +164,6 @@ document.addEventListener('DOMContentLoaded', () => {
         chrome.storage.local.set({ selectedToggleDenylist: toggleDenylistInput.value || DEFAULT_DENYLIST });
     });
     fieldOverridesInput.addEventListener('blur', saveFieldOverrides);
-
-    const LOGIN_CREDS: Record<string, { email: string; password: string }> = {
-        school_admin: { email: 'inkubasiatester+school_admin@gmail.com', password: '123Testertester' },
-        org_admin:    { email: 'inkubasiatester+org_admin@gmail.com',    password: '123Testertester' },
-        editor:       { email: 'inkubasiatester+editor@gmail.com',       password: '123Testertester' },
-        user:         { email: 'inkubasiatester+user@gmail.com',         password: '123Testertester' },
-    };
-
-    document.querySelectorAll<HTMLButtonElement>('.login-btn').forEach((btn) => {
-        btn.addEventListener('click', () => {
-            const role = btn.dataset.role as string;
-            const creds = LOGIN_CREDS[role];
-            if (!creds) return;
-
-            chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-                const activeTab = tabs[0];
-                if (activeTab && activeTab.id) {
-                    chrome.tabs.sendMessage(activeTab.id, {
-                        action: 'LOGIN_AS',
-                        email: creds.email,
-                        password: creds.password
-                    });
-                }
-            });
-        });
-    });
 
     fillBtn.addEventListener('click', () => {
         const fieldOverrides = parseFieldOverrides(fieldOverridesInput.value || '');
