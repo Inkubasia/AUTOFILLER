@@ -20,26 +20,32 @@
     const configDataInput = document.getElementById("configDataInput");
     const reportOutput = document.getElementById("reportOutput");
     const DEFAULT_DENYLIST = "none,no,not applicable,prefer not,decline";
-    const LOGIN_EMAIL_KEYS = [
-      "loginEmail_school_admin",
-      "loginEmail_org_admin",
-      "loginEmail_editor",
-      "loginEmail_user"
-    ];
-    const loginEmailInputs = document.querySelectorAll("[data-login-email-key]");
-    chrome.storage.local.get(LOGIN_EMAIL_KEYS, (result) => {
-      loginEmailInputs.forEach((input) => {
-        const key = input.dataset.loginEmailKey;
-        if (result[key])
-          input.value = result[key];
+    const LOGIN_ROLE_KEYS = ["school_admin", "org_admin", "editor", "user"];
+    const loginEnvSelect = document.getElementById("loginEnvSelect");
+    const loginCredInputs = document.querySelectorAll("[data-login-role][data-login-field]");
+    const credsKey = (env, role) => `loginCreds_${env}_${role}`;
+    const loadLoginCreds = () => {
+      const env = loginEnvSelect.value;
+      const keys = LOGIN_ROLE_KEYS.map((r) => credsKey(env, r));
+      chrome.storage.local.get(keys, (result) => {
+        loginCredInputs.forEach((input) => {
+          const creds = result[credsKey(env, input.dataset.loginRole)];
+          input.value = creds?.[input.dataset.loginField] ?? "";
+        });
       });
-    });
-    loginEmailInputs.forEach((input) => {
-      input.addEventListener("blur", () => {
-        const key = input.dataset.loginEmailKey;
-        chrome.storage.local.set({ [key]: input.value.trim() });
+    };
+    const saveLoginCreds = () => {
+      const env = loginEnvSelect.value;
+      const payload = {};
+      LOGIN_ROLE_KEYS.forEach((role) => {
+        const get = (field) => document.querySelector(`[data-login-role="${role}"][data-login-field="${field}"]`)?.value ?? "";
+        payload[credsKey(env, role)] = { email: get("email").trim(), password: get("password") };
       });
-    });
+      chrome.storage.local.set(payload);
+    };
+    loginEnvSelect.addEventListener("change", loadLoginCreds);
+    loginCredInputs.forEach((input) => input.addEventListener("blur", saveLoginCreds));
+    loadLoginCreds();
     const normalizeOverrideKey = (key) => {
       const normalized = key.trim().toLowerCase();
       if (normalized === "name" || normalized === "firstname" || normalized === "first_name")
@@ -146,30 +152,6 @@
       chrome.storage.local.set({ selectedToggleDenylist: toggleDenylistInput.value || DEFAULT_DENYLIST });
     });
     fieldOverridesInput.addEventListener("blur", saveFieldOverrides);
-    const LOGIN_CREDS = {
-      school_admin: { email: "inkubasiatester+school_admin@gmail.com", password: "123Testertester" },
-      org_admin: { email: "inkubasiatester+org_admin@gmail.com", password: "123Testertester" },
-      editor: { email: "inkubasiatester+editor@gmail.com", password: "123Testertester" },
-      user: { email: "inkubasiatester+user@gmail.com", password: "123Testertester" }
-    };
-    document.querySelectorAll(".login-btn").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const role = btn.dataset.role;
-        const creds = LOGIN_CREDS[role];
-        if (!creds)
-          return;
-        chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-          const activeTab = tabs[0];
-          if (activeTab && activeTab.id) {
-            chrome.tabs.sendMessage(activeTab.id, {
-              action: "LOGIN_AS",
-              email: creds.email,
-              password: creds.password
-            });
-          }
-        });
-      });
-    });
     fillBtn.addEventListener("click", () => {
       const fieldOverrides = parseFieldOverrides(fieldOverridesInput.value || "");
       saveFieldOverrides();

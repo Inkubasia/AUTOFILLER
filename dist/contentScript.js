@@ -7052,13 +7052,19 @@ Try adjusting maxTime or maxRetries parameters for faker.helpers.unique().`);
   var LOGIN_POPUP_ID = "qa-autofill-login-popup";
   var LOGIN_URL_PATTERNS = ["/noauth/login", "/noauth/login/", "/login", "/signin", "/sign-in"];
   var LOGIN_ROLES = [
-    { label: "School Admin", role: "school_admin", storageKey: "loginEmail_school_admin", defaultEmail: "inkubasiatester+school_admin@gmail.com" },
-    { label: "Org Admin", role: "org_admin", storageKey: "loginEmail_org_admin", defaultEmail: "inkubasiatester+org_admin@gmail.com" },
-    { label: "Editor", role: "editor", storageKey: "loginEmail_editor", defaultEmail: "inkubasiatester+editor@gmail.com" },
-    { label: "User", role: "user", storageKey: "loginEmail_user", defaultEmail: "inkubasiatester+user@gmail.com" }
+    { label: "School Admin", role: "school_admin", defaultEmail: "inkubasiatester+school_admin@gmail.com" },
+    { label: "Org Admin", role: "org_admin", defaultEmail: "inkubasiatester+org_admin@gmail.com" },
+    { label: "Editor", role: "editor", defaultEmail: "inkubasiatester+editor@gmail.com" },
+    { label: "User", role: "user", defaultEmail: "inkubasiatester+user@gmail.com" }
   ];
-  var LOGIN_PASSWORD = "123Testertester";
-  var LOGIN_PROD_HOSTS = ["app.enquirytracker.net", "app-us.enquirytracker.net"];
+  var LOGIN_DEFAULT_PASSWORD = "123Testertester";
+  var LOGIN_ENV_HOSTS = {
+    "dev.enquirytracker.net": "dev",
+    "staging.enquirytracker.net": "staging",
+    "app.enquirytracker.net": "app",
+    "app-us.enquirytracker.net": "app-us"
+  };
+  var LOGIN_ENVS_WITH_DEFAULTS = ["dev", "staging"];
   var DEFAULT_AUTO_POPUP_HOSTS = [
     "app.enquirytracker.net",
     "app-us.enquirytracker.net",
@@ -7072,7 +7078,6 @@ Try adjusting maxTime or maxRetries parameters for faker.helpers.unique().`);
   var KG_LOCAL_PHONE = "777777777";
   var learningListenersAttached = false;
   var loginPopupDismissed = false;
-  var loginPopupLastUrl = "";
   var currentFormType = "general";
   var currentSettings = null;
   var currentReport = null;
@@ -7145,7 +7150,8 @@ Try adjusting maxTime or maxRetries parameters for faker.helpers.unique().`);
   try {
     chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       if (message.action === "LOGIN_AS") {
-        handleLoginAs(message.email, message.password).then((ok) => sendResponse({ status: ok ? "success" : "not_found" })).catch(() => sendResponse({ status: "error" }));
+        const env = getLoginEnv();
+        (env ? resolveLoginCreds(env, message.role) : Promise.resolve(null)).then((creds) => creds ? handleLoginAs(creds.email, creds.password) : Promise.resolve(null)).then((ok) => sendResponse({ status: ok === null ? "no_creds" : ok ? "success" : "not_found" })).catch(() => sendResponse({ status: "error" }));
         return true;
       }
       if (message.action === "FILL_FORM") {
@@ -7568,20 +7574,35 @@ Try adjusting maxTime or maxRetries parameters for faker.helpers.unique().`);
   function removeAutoPopup() {
     document.getElementById(AUTO_POPUP_ID)?.remove();
   }
+  function getLoginEnv() {
+    const host = window.location.hostname.toLowerCase();
+    for (const [h65, env] of Object.entries(LOGIN_ENV_HOSTS)) {
+      if (host === h65 || host.endsWith(`.${h65}`))
+        return env;
+    }
+    return null;
+  }
+  async function resolveLoginCreds(env, role) {
+    const key = `loginCreds_${env}_${role}`;
+    const stored = (await getStorage([key]))[key];
+    const def = LOGIN_ROLES.find((r39) => r39.role === role);
+    const useDefaults = LOGIN_ENVS_WITH_DEFAULTS.includes(env);
+    const email = (stored?.email || (useDefaults ? def?.defaultEmail : "") || "").trim();
+    const password = stored?.password || (useDefaults ? LOGIN_DEFAULT_PASSWORD : "");
+    if (!email || !password)
+      return null;
+    return { email, password };
+  }
   function removeLoginPopup() {
-    document.getElementById(LOGIN_POPUP_ID)?.remove();
+    document.querySelectorAll(`#${LOGIN_POPUP_ID}`).forEach((el) => el.remove());
   }
   function isLoginPage() {
+    if (!getLoginEnv())
+      return false;
     const path = window.location.pathname.toLowerCase();
-    const host = window.location.hostname.toLowerCase();
-    if (LOGIN_PROD_HOSTS.some((h65) => host === h65))
-      return false;
-    const isTrackedHost = DEFAULT_AUTO_POPUP_HOSTS.some((h65) => host === h65 || host.endsWith(`.${h65}`));
-    if (!isTrackedHost)
-      return false;
     return LOGIN_URL_PATTERNS.some((pattern) => path.includes(pattern));
   }
-  function createLoginPopupElement(customEmails = {}) {
+  function createLoginPopupElement(env) {
     const popup = document.createElement("div");
     popup.id = LOGIN_POPUP_ID;
     popup.style.cssText = [
@@ -7604,7 +7625,7 @@ Try adjusting maxTime or maxRetries parameters for faker.helpers.unique().`);
         <strong style="font-size:13px;">QA Login</strong>
         <button id="qa-login-close" style="border:none;background:transparent;cursor:pointer;font-size:16px;line-height:1;color:#666;">\xD7</button>
       </div>
-      <div style="font-size:11px;color:#64748b;margin-bottom:10px;">Login page detected. Choose a role:</div>
+      <div style="font-size:11px;color:#64748b;margin-bottom:10px;">Login page detected (${env}). Choose a role:</div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">
         ${LOGIN_ROLES.map((r39) => `<button data-qa-login-role="${r39.role}" style="${btnStyle}">${r39.label}</button>`).join("")}
       </div>
@@ -7612,29 +7633,20 @@ Try adjusting maxTime or maxRetries parameters for faker.helpers.unique().`);
     `;
     return popup;
   }
-  async function maybeShowLoginPopup() {
+  function maybeShowLoginPopup() {
     if (!document.body)
       return;
-    const currentUrl = window.location.href;
     if (!isLoginPage()) {
-      if (loginPopupLastUrl !== currentUrl) {
-        loginPopupDismissed = false;
-        loginPopupLastUrl = currentUrl;
-      }
+      loginPopupDismissed = false;
       removeLoginPopup();
       return;
     }
-    if (loginPopupLastUrl !== currentUrl) {
-      loginPopupDismissed = false;
-      loginPopupLastUrl = currentUrl;
-    }
-    if (loginPopupDismissed)
+    const env = getLoginEnv();
+    if (!env)
       return;
-    if (document.getElementById(LOGIN_POPUP_ID))
+    if (document.getElementById(LOGIN_POPUP_ID) || loginPopupDismissed)
       return;
-    const storageKeys = LOGIN_ROLES.map((r39) => r39.storageKey);
-    const stored = await getStorage(storageKeys);
-    const popup = createLoginPopupElement(stored);
+    const popup = createLoginPopupElement(env);
     document.body.appendChild(popup);
     popup.querySelector("#qa-login-close")?.addEventListener("click", () => {
       loginPopupDismissed = true;
@@ -7646,12 +7658,17 @@ Try adjusting maxTime or maxRetries parameters for faker.helpers.unique().`);
         const roleDef = LOGIN_ROLES.find((r39) => r39.role === role);
         if (!roleDef)
           return;
-        const email = (stored[roleDef.storageKey] || roleDef.defaultEmail).trim();
         const statusEl = popup.querySelector("#qa-login-status");
+        const creds = await resolveLoginCreds(env, role);
+        if (!creds) {
+          if (statusEl)
+            statusEl.textContent = `No ${env} account set. Open extension > Login Accounts.`;
+          return;
+        }
         btn.disabled = true;
         if (statusEl)
           statusEl.textContent = `Logging in as ${roleDef.label}\u2026`;
-        const ok = await handleLoginAs(email, LOGIN_PASSWORD);
+        const ok = await handleLoginAs(creds.email, creds.password);
         if (statusEl)
           statusEl.textContent = ok ? "Done!" : "Login form not found yet.";
         if (!ok)
